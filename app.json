@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "hearing-hope-mobile",
+    "plugins": ["expo-notifications"],
+    "slug": "hearing-hope-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSExceptionDomains": {
+            "192.168.1.107": {
+              "NSExceptionAllowsInsecureHTTPLoads": true,
+              "NSRequiresCertificateTransparency": false
+            },
+            "192.168.0.110": {
+              "NSExceptionAllowsInsecureHTTPLoads": true,
+              "NSRequiresCertificateTransparency": false
+            }
+          }
+        }
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}
