@@ -1,5 +1,7 @@
 // https://docs.expo.dev/workflow/configuration/
 // CRM URL drives cleartext + iOS ATS: HTTPS production URL needs no exceptions.
+// EAS project ID (from `eas init`) — required for builds & push tokens; cannot be auto-injected into dynamic config.
+const EAS_PROJECT_ID = 'db9a579f-c050-4053-b4e9-3821529c901c';
 
 function parseHttpHostnameForATS(crmUrl: string): string | null {
   try {
@@ -67,7 +69,7 @@ export default function appConfig() {
     plugins: ['expo-notifications'],
     extra: {
       eas: {
-        projectId: process.env.EXPO_PUBLIC_EAS_PROJECT_ID,
+        projectId: process.env.EXPO_PUBLIC_EAS_PROJECT_ID ?? EAS_PROJECT_ID,
       },
     },
   };
