@@ -16,7 +16,8 @@ Mobile app for home visit employees to view their assigned appointments, call pa
    - Android emulator: use `http://10.0.2.2:3000`
    - iOS simulator: use `http://localhost:3000`
 
-3. Install dependencies: `npm install`
+3. Install dependencies: `npm install`  
+   If installs or deleting `node_modules` seem frozen, see **BUILD_AND_DISTRIBUTE.md** (iCloud Desktop slowness) or run `npm run reinstall`.
 
 4. Start the app: `npm start`
 
