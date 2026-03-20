@@ -96,6 +96,35 @@ eas build --platform android --profile preview
 |------|---------|
 | Internal APK | `npm run build:apk` or `eas build --platform android --profile preview` |
 | APK (production channel) | `npm run build:apk:production` |
+| **OTA update** (preview channel) | `npm run update:preview` (clean git tree + logged into EAS) |
+| **OTA update** (production channel) | `npm run update:production` |
+
+---
+
+## OTA updates (EAS Update)
+
+The app includes **`expo-updates`**. `app.config.ts` sets **`runtimeVersion`** to **`appVersion`** and **`updates.url`** to the Expo Update server, and **`eas.json`** assigns **`channel`** **`preview`** / **`production`** to match how you built the APK.
+
+### One-time: ship a new APK after enabling OTA
+
+Employees must install an APK that was built **after** this config exists (native module + update URL baked in). Existing installs from older builds will not receive EAS Update bundles reliably.
+
+1. Commit your changes (`requireCommit` is on for `eas build`).
+2. Run **`npm run build:apk`** (preview) or **`npm run build:apk:production`** (production).
+3. Distribute the new APK as usual.
+
+### Day-to-day: publish JS/asset changes without a new APK
+
+Only safe when you did **not** add native code, change `runtimeVersion` policy, or bump **`version`** in `app.config.ts` in a way that mismatches the binary (with **`appVersion`**, bumping app version means you need a **new store/APK** for that version line).
+
+1. **Commit** your JS/TS/asset changes (EAS may require a clean tree).
+2. Publish to the **same channel** as the APK employees use:
+   - Preview APK → **`npm run update:preview`**
+   - Production-profile APK → **`npm run update:production`**
+3. Scripts use **`--auto`** (git branch + last commit subject as the update message). To set a message yourself:  
+   `eas update --channel preview --platform android -m "Fix login" --non-interactive`
+
+Employees get updates on **next cold start** (config uses **`checkAutomatically: ON_LOAD`**).
 
 ---
 
@@ -119,7 +148,8 @@ Physical iPhones need an Apple Developer account and **TestFlight** or Ad Hoc. S
   - **`npm run reinstall`** now does this automatically (moves `node_modules` aside, runs `npm install`, deletes old tree in the background).
   - **If `mv` errors “Operation not permitted” / lock:** quit **Cursor**, **Metro**, and any `node` processes, then retry.
   - **Best long-term fix:** move the whole project to **`~/Developer/...`** (not iCloud-synced Desktop).
-- **EAS asked to install `expo-updates` / `npm` sat there with `EBADENGINE` warnings**: This project’s `eas.json` does **not** use EAS Update **channels** (those require `expo-updates`). You only need a normal APK—run **`npm run build:apk`** again and choose **no** if prompted to add `expo-updates`. Upgrade **Node to ≥ 20.19.4** (see `.nvmrc`) so installs finish faster and warnings stop.
+- **`eas update` fails on dirty tree**: Commit (or stash) changes; same idea as **`requireCommit`** for builds.
+- **`npm` / `EBADENGINE` warnings**: Upgrade **Node to ≥ 20.19.4** (see `.nvmrc`).
 - **`EXPO_PUBLIC_CRM_URL` / login errors on APK**: Confirm the CRM is deployed with HTTPS, URL matches `eas.json` / EAS env, and `/api/mobile-login` works in a browser: `https://YOUR-CRM/api/mobile-login` (POST only—expect JSON error on GET; use CRM UI + app).
 - **“No projectId” / no push tokens**: Run `eas init`, set `EXPO_PUBLIC_EAS_PROJECT_ID` in EAS **Environment variables** for the build profile.
 - **APK won’t install**: Enable installs from unknown sources for the app used to open the APK.

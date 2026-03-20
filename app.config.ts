@@ -39,6 +39,13 @@ export default function appConfig() {
     name: 'Hearing Hope Mobile',
     slug: 'hearing-hope-mobile',
     version: '1.0.0',
+    // EAS Update: JS bundle must match native binary — bumps when app version changes.
+    runtimeVersion: { policy: 'appVersion' as const },
+    updates: {
+      url: `https://u.expo.dev/${EAS_PROJECT_ID}`,
+      checkAutomatically: 'ON_LOAD' as const,
+      fallbackToCacheTimeout: 0,
+    },
     orientation: 'portrait' as const,
     icon: './assets/icon.png',
     userInterfaceStyle: 'light' as const,
@@ -66,7 +73,7 @@ export default function appConfig() {
     web: {
       favicon: './assets/favicon.png',
     },
-    plugins: ['expo-notifications'],
+    plugins: ['expo-notifications', 'expo-updates'],
     extra: {
       eas: {
         projectId: process.env.EXPO_PUBLIC_EAS_PROJECT_ID ?? EAS_PROJECT_ID,
