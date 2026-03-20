@@ -15,6 +15,18 @@ Employee devices use **mobile data or random Wi‑Fi**—they cannot reach `192.
 
 ---
 
+## After `npm install` → build the APK
+
+1. Install EAS CLI (once): `npm install -g eas-cli`
+2. Log in: `eas login`
+3. **First time only:** if you haven’t linked this repo to Expo, run `eas init` (project id is already in `app.config.ts`; say no to anything that wants to change it if unsure).
+4. **[expo.dev](https://expo.dev)** → your project **hearing-hope-mobile** → **Environment variables** → add every **`EXPO_PUBLIC_FIREBASE_*`** (and optional **`EXPO_PUBLIC_EAS_PROJECT_ID`**) for **Preview** (and Production if you use that profile). Cloud builds **do not** read your local `.env`.
+5. Confirm **`eas.json`** has the correct **`EXPO_PUBLIC_CRM_URL`** for your live CRM (HTTPS).
+6. From this folder run: **`npm run build:apk`**
+7. Wait for the cloud build (~10–20 min). Open the **download link** in the terminal or under **expo.dev → Builds** → share that **.apk** with staff.
+
+---
+
 ## Prerequisites
 
 1. **Node.js `>= 20.19.4`** (Expo SDK 54 / RN 0.81). If `npm` prints many `EBADENGINE` lines and seems slow or stuck, upgrade Node (e.g. [nvm](https://github.com/nvm-sh/nvm): `nvm install` in this folder reads `.nvmrc`).
