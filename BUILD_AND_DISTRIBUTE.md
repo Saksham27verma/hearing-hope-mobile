@@ -17,24 +17,25 @@ Employee devices use **mobile data or random Wi‑Fi**—they cannot reach `192.
 
 ## Prerequisites
 
-1. **Expo account** (free): [expo.dev](https://expo.dev)
-2. **EAS CLI** (run from this folder):
+1. **Node.js `>= 20.19.4`** (Expo SDK 54 / RN 0.81). If `npm` prints many `EBADENGINE` lines and seems slow or stuck, upgrade Node (e.g. [nvm](https://github.com/nvm-sh/nvm): `nvm install` in this folder reads `.nvmrc`).
+2. **Expo account** (free): [expo.dev](https://expo.dev)
+3. **EAS CLI** (run from this folder):
 
    ```bash
    npm install -g eas-cli
    eas login
    ```
 
-3. **Link the project** (first time only):
+4. **Link the project** (first time only):
 
    ```bash
    cd hearing-hope-mobile
    eas init
    ```
 
-   Copy the **project ID** into your local `.env` as `EXPO_PUBLIC_EAS_PROJECT_ID=...` (needed for Expo push tokens and local `expo start` parity).
+   The EAS project ID is already set in `app.config.ts` after setup. You can optionally set `EXPO_PUBLIC_EAS_PROJECT_ID` in `.env` to override locally.
 
-4. **EAS Build cannot read your local `.env`** (it is gitignored). Set these on [expo.dev](https://expo.dev) → your project → **Environment variables** for **Preview** and **Production** (same names as below), **or** rely on non-secret values already in `eas.json` and only add secrets in the dashboard:
+5. **EAS Build cannot read your local `.env`** (it is gitignored). Set these on [expo.dev](https://expo.dev) → your project → **Environment variables** for **Preview** and **Production** (same names as below), **or** rely on non-secret values already in `eas.json` and only add secrets in the dashboard:
 
    | Variable | Notes |
    |----------|--------|
@@ -94,6 +95,7 @@ Physical iPhones need an Apple Developer account and **TestFlight** or Ad Hoc. S
 
 ## Troubleshooting
 
+- **EAS asked to install `expo-updates` / `npm` sat there with `EBADENGINE` warnings**: This project’s `eas.json` does **not** use EAS Update **channels** (those require `expo-updates`). You only need a normal APK—run **`npm run build:apk`** again and choose **no** if prompted to add `expo-updates`. Upgrade **Node to ≥ 20.19.4** (see `.nvmrc`) so installs finish faster and warnings stop.
 - **`EXPO_PUBLIC_CRM_URL` / login errors on APK**: Confirm the CRM is deployed with HTTPS, URL matches `eas.json` / EAS env, and `/api/mobile-login` works in a browser: `https://YOUR-CRM/api/mobile-login` (POST only—expect JSON error on GET; use CRM UI + app).
 - **“No projectId” / no push tokens**: Run `eas init`, set `EXPO_PUBLIC_EAS_PROJECT_ID` in EAS **Environment variables** for the build profile.
 - **APK won’t install**: Enable installs from unknown sources for the app used to open the APK.

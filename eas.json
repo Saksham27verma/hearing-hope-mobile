@@ -15,7 +15,6 @@
       "ios": {
         "simulator": false
       },
-      "channel": "preview",
       "env": {
         "EXPO_PUBLIC_CRM_URL": "https://hearing-hope-crm.vercel.app"
       }
@@ -24,7 +23,6 @@
       "android": {
         "buildType": "apk"
       },
-      "channel": "production",
       "env": {
         "EXPO_PUBLIC_CRM_URL": "https://hearing-hope-crm.vercel.app"
       }
