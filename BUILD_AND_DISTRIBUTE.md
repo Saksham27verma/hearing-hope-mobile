@@ -123,3 +123,6 @@ Physical iPhones need an Apple Developer account and **TestFlight** or Ad Hoc. S
 - **`EXPO_PUBLIC_CRM_URL` / login errors on APK**: Confirm the CRM is deployed with HTTPS, URL matches `eas.json` / EAS env, and `/api/mobile-login` works in a browser: `https://YOUR-CRM/api/mobile-login` (POST only—expect JSON error on GET; use CRM UI + app).
 - **“No projectId” / no push tokens**: Run `eas init`, set `EXPO_PUBLIC_EAS_PROJECT_ID` in EAS **Environment variables** for the build profile.
 - **APK won’t install**: Enable installs from unknown sources for the app used to open the APK.
+- **`eas build` stuck on “Compressing project files” for a long time**:
+  - **Cause A:** A leftover **`node_modules_trash_*`** or **`node_modules.__trash_*`** folder (from `npm run reinstall`) is still in the project. It is huge — EAS was trying to zip it. **Delete those folders** (Finder or `rm -rf node_modules_trash_* node_modules.__trash_*`), then run `eas build` again. They are now listed in **`.easignore`** and **`.gitignore`** so this should not recur.
+  - **Cause B:** Project on **iCloud Desktop** — compression reads every file slowly. Move the repo to **`~/Developer/...`** for faster uploads, or wait longer.

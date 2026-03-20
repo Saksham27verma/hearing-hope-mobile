@@ -1,0 +1,14 @@
+# Keep EAS uploads tiny — "Compressing project files" only packs what is listed as NOT ignored.
+# See: https://docs.expo.dev/build-reference/easignore/
+
+node_modules
+node_modules.__trash_*
+node_modules_trash_*
+.git
+.expo
+dist
+web-build
+**/.DS_Store
+*.log
+npm-debug.*
+coverage

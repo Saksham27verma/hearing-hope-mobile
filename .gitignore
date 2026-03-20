@@ -2,6 +2,9 @@
 
 # dependencies
 node_modules/
+# Leftover from rename-based reinstall — never upload (EAS would compress gigabytes for hours)
+node_modules.__trash_*
+node_modules_trash_*
 
 # Expo
 .expo/
