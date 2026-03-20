@@ -51,3 +51,14 @@ The project uses **Expo SDK 54** to match the Expo Go version on the App Store/P
 2. **Clear cache and restart**: `npm run start:clear`
 3. **Use tunnel mode** if on a different network: `npm run start:tunnel`
 4. **Android**: Install Expo Go from [expo.dev/go](https://expo.dev/go) if the Play Store version is outdated.
+
+## Git (own repo)
+
+This app lives in a **separate** Git repo from `hearing-hope-crm`. Create an empty repo on GitHub, then:
+
+```bash
+git remote add origin https://github.com/YOUR_USER/hearing-hope-mobile.git
+git push -u origin main
+```
+
+Do not commit `.env` (it is gitignored). See `../REPOS_SETUP.md` in the parent folder for CRM + mobile push tips.
