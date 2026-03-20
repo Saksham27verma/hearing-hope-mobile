@@ -95,11 +95,18 @@ Physical iPhones need an Apple Developer account and **TestFlight** or Ad Hoc. S
 
 ## Troubleshooting
 
-- **`rm -rf node_modules` or `npm install` looks stuck (no new lines for a long time)**:
-  - Projects under **Desktop/Documents synced with iCloud** are very slow for huge folders like `node_modules` (thousands of files). Deleting can take **15–40+ minutes** — it is often still working; avoid **Ctrl+C** unless you truly want to stop.
-  - **Best fix:** move the repo to a non‑iCloud path, e.g. `~/Developer/hearing-hope-mobile` (or turn off *Desktop & Documents in iCloud* for that machine). Then `npm run reinstall` is much faster.
-  - **Before deleting:** quit Cursor/VS Code (or close this folder) so nothing locks files under `node_modules`.
-  - **One command** (retry-friendly delete + install): `npm run reinstall`
+- **`rm -rf node_modules` or `npm install` looks stuck (count in `node_modules` never drops)**:
+  - On **iCloud Desktop**, deleting inside a huge tree often **does not progress**. Don’t rely on `rm -rf` there.
+  - **Use a rename instead** (one instant step on the same disk), then install:
+    ```bash
+    cd hearing-hope-mobile
+    mv node_modules "node_modules_trash_$(date +%s)"
+    npm install
+    ```
+    Delete `node_modules_trash_*` later in Finder when you have time, or leave it.
+  - **`npm run reinstall`** now does this automatically (moves `node_modules` aside, runs `npm install`, deletes old tree in the background).
+  - **If `mv` errors “Operation not permitted” / lock:** quit **Cursor**, **Metro**, and any `node` processes, then retry.
+  - **Best long-term fix:** move the whole project to **`~/Developer/...`** (not iCloud-synced Desktop).
 - **EAS asked to install `expo-updates` / `npm` sat there with `EBADENGINE` warnings**: This project’s `eas.json` does **not** use EAS Update **channels** (those require `expo-updates`). You only need a normal APK—run **`npm run build:apk`** again and choose **no** if prompted to add `expo-updates`. Upgrade **Node to ≥ 20.19.4** (see `.nvmrc`) so installs finish faster and warnings stop.
 - **`EXPO_PUBLIC_CRM_URL` / login errors on APK**: Confirm the CRM is deployed with HTTPS, URL matches `eas.json` / EAS env, and `/api/mobile-login` works in a browser: `https://YOUR-CRM/api/mobile-login` (POST only—expect JSON error on GET; use CRM UI + app).
 - **“No projectId” / no push tokens**: Run `eas init`, set `EXPO_PUBLIC_EAS_PROJECT_ID` in EAS **Environment variables** for the build profile.
