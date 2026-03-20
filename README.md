@@ -7,8 +7,8 @@ Mobile app for home visit employees to view their assigned appointments, call pa
 ## Setup
 
 1. Copy `.env.example` to `.env` and configure:
-   - `EXPO_PUBLIC_CRM_URL`: Your CRM URL (e.g. `https://your-crm.vercel.app` for production, or `http://YOUR_IP:3000` for local dev on a physical device)
-   - Firebase config (same values as the web CRM)
+   - **`EXPO_PUBLIC_CRM_URL`**: For an **employee APK**, use your **live HTTPS** CRM URL (e.g. `https://hearing-hope-crm.vercel.app`). **Do not use your laptop’s IP** in builds you distribute—phones cannot reach your home/office LAN. Use `http://192.168.x.x:3000` only for **your own** on-device dev while the CRM runs on your computer.
+   - Firebase config (same values as the web CRM). Cloud APK builds also need these in **Expo → Environment variables**; see [BUILD_AND_DISTRIBUTE.md](./BUILD_AND_DISTRIBUTE.md).
 
 2. For local development with a physical device:
    - Run the CRM: `cd hearing-hope-crm && npm run dev`

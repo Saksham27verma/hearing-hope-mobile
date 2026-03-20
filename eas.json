@@ -15,13 +15,19 @@
       "ios": {
         "simulator": false
       },
-      "channel": "preview"
+      "channel": "preview",
+      "env": {
+        "EXPO_PUBLIC_CRM_URL": "https://hearing-hope-crm.vercel.app"
+      }
     },
     "production": {
       "android": {
         "buildType": "apk"
       },
-      "channel": "production"
+      "channel": "production",
+      "env": {
+        "EXPO_PUBLIC_CRM_URL": "https://hearing-hope-crm.vercel.app"
+      }
     }
   },
   "submit": {
