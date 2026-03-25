@@ -11,8 +11,8 @@
     "web": "expo start --web",
     "build:apk": "eas build --platform android --profile preview",
     "build:apk:production": "eas build --platform android --profile production",
-    "update:preview": "eas update --channel preview --platform android --auto --non-interactive",
-    "update:production": "eas update --channel production --platform android --auto --non-interactive",
+    "update:preview": "EAS_SKIP_AUTO_FINGERPRINT=1 eas update --channel preview --platform android --auto --non-interactive",
+    "update:production": "EAS_SKIP_AUTO_FINGERPRINT=1 eas update --channel production --platform android --auto --non-interactive",
     "reinstall": "node scripts/reinstall-deps.js"
   },
   "dependencies": {
