@@ -262,7 +262,7 @@ export default function AppointmentDetailScreen({
           </DetailSection>
 
           {(centerName || appointment.centerId) ? (
-            <DetailSection label="Center of Enquiry" last={!appointment.notes}>
+            <DetailSection label="Center" last={!appointment.notes}>
               <Text style={styles.value}>{centerName || appointment.centerId || '—'}</Text>
             </DetailSection>
           ) : null}

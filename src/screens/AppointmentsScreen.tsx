@@ -192,7 +192,6 @@ export default function AppointmentsScreen({ onAppointmentPress, onLogout }: App
   const renderCard = (item: Appointment) => {
     const statusConfig = getStatusConfig(item.status);
     const isHomeVisit = item.type === 'home';
-    const isCenterVisit = item.type === 'center';
     const centerLabel = item.centerName || item.centerId || 'Center';
     return (
       <TouchableOpacity
@@ -229,7 +228,7 @@ export default function AppointmentsScreen({ onAppointmentPress, onLogout }: App
               <Text style={styles.cardMetaText} numberOfLines={1}>{item.address}</Text>
             </View>
           ) : null}
-          {isCenterVisit ? (
+          {item.centerId || item.centerName ? (
             <View style={styles.metaRow}>
               <Ionicons name="business-outline" size={14} color={theme.colors.textMuted} style={styles.metaIcon} />
               <Text style={styles.cardMetaText} numberOfLines={1}>{centerLabel}</Text>

@@ -111,8 +111,8 @@ export function AppointmentsProvider({ children }: { children: React.ReactNode }
           return toStr(a.start).localeCompare(toStr(b.start));
         });
 
-        // Resolve center names for center appointments that have centerId but no centerName
-        const needCenterName = list.filter((a) => a.type === 'center' && a.centerId && !a.centerName);
+        // Resolve center names when centerId is set but centerName is missing (center + home visits)
+        const needCenterName = list.filter((a) => a.centerId && !a.centerName);
         if (needCenterName.length > 0) {
           const centersSnap = await getDocs(collection(db, 'centers'));
           const centerById: Record<string, string> = {};
