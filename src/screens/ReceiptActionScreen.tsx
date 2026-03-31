@@ -24,6 +24,11 @@ import {
   type PaymentMode,
   type ReceiptType,
 } from '../api/collectPayment';
+import {
+  htmlTemplateIdForReceiptType,
+  loadStaffReceiptTemplateLabels,
+  type StaffReceiptTemplateLabels,
+} from '../api/receiptTemplateRouting';
 import { fetchAvailableInventory, type StaffInventoryRow } from '../api/staffInventory';
 import { fetchStaffEnquiryConfig, type FieldOption } from '../api/staffEnquiryConfig';
 import { fetchStaffProductsCatalog, type CatalogProduct } from '../api/staffProductsCatalog';
@@ -86,6 +91,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
   const [paymentMode, setPaymentMode] = useState<PaymentMode>('cash');
   const [receiptType, setReceiptType] = useState<ReceiptType>('booking');
   const [submitting, setSubmitting] = useState(false);
+  const [templateLabels, setTemplateLabels] = useState<StaffReceiptTemplateLabels>({});
 
   const [earOptions, setEarOptions] = useState<FieldOption[]>(FALLBACK_EAR);
   const [trialLocOptions, setTrialLocOptions] = useState<FieldOption[]>(FALLBACK_TRIAL_LOC);
@@ -149,6 +155,21 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const labels = await loadStaffReceiptTemplateLabels();
+        if (!cancelled) setTemplateLabels(labels);
+      } catch {
+        if (!cancelled) setTemplateLabels({});
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (receiptType === 'invoice' || (receiptType === 'trial' && trialLoc === 'home')) {
       void loadInventory();
     }
@@ -188,6 +209,12 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
       )
       .slice(0, 80);
   }, [inventoryItems, invSearch, receiptType, trialLoc, trialProduct]);
+
+  const currentPdfTemplate = useMemo(() => {
+    if (receiptType === 'booking') return templateLabels.booking;
+    if (receiptType === 'trial') return templateLabels.trial;
+    return templateLabels.invoice;
+  }, [receiptType, templateLabels]);
 
   const fromCache = useMemo(
     () => appointments.find((a) => a.id === appointmentId) || null,
@@ -424,12 +451,14 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
                 },
               };
 
+      const htmlTemplateId = htmlTemplateIdForReceiptType(templateLabels, receiptType);
       const result = await submitCollectPayment({
         appointmentId: resolved.id,
         amount: n,
         paymentMode,
         receiptType,
         details,
+        ...(htmlTemplateId ? { htmlTemplateId } : {}),
       });
       if (!result.ok) {
         Alert.alert('Failed', result.error || 'Could not send request');
@@ -531,6 +560,23 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
               <Text style={[styles.chipText, receiptType === t && styles.chipTextActive]}>{t}</Text>
             </TouchableOpacity>
           ))}
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.sectionLabel}>PDF template (CRM)</Text>
+          {currentPdfTemplate ? (
+            <>
+              <Text style={styles.patientName}>{currentPdfTemplate.name}</Text>
+              <Text style={styles.metaLine}>ID: {currentPdfTemplate.id}</Text>
+              <Text style={[styles.metaLine, { marginTop: 8, fontSize: 12 }]}>
+                Pinned in CRM Invoice Manager; this ID is sent with your request so the PDF matches the CRM.
+              </Text>
+            </>
+          ) : (
+            <Text style={styles.metaLine}>
+              No template pinned for this receipt type in CRM. The server will pick a default HTML template.
+            </Text>
+          )}
         </View>
 
         {receiptType === 'booking' ? (

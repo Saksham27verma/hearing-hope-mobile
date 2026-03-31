@@ -53,7 +53,8 @@ export async function submitCollectPayment(body: {
   paymentMode: PaymentMode;
   receiptType: ReceiptType;
   details: CollectPaymentDetails;
-}): Promise<{ ok: boolean; error?: string; emailSent?: boolean }> {
+  htmlTemplateId?: string;
+}): Promise<{ ok: boolean; error?: string; emailSent?: boolean; htmlTemplateIdUsed?: string | null }> {
   const user = auth.currentUser;
   if (!user) {
     return { ok: false, error: 'Not signed in' };
@@ -74,5 +75,6 @@ export async function submitCollectPayment(body: {
   return {
     ok: true,
     emailSent: (data as { emailSent?: boolean }).emailSent,
+    htmlTemplateIdUsed: (data as { htmlTemplateIdUsed?: string | null }).htmlTemplateIdUsed ?? null,
   };
 }
