@@ -183,6 +183,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
         (it) =>
           it.name.toLowerCase().includes(q) ||
           it.company.toLowerCase().includes(q) ||
+          it.type.toLowerCase().includes(q) ||
           it.serialNumber.toLowerCase().includes(q)
       )
       .slice(0, 80);
@@ -750,7 +751,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
               >
                 <Text style={styles.invName}>{item.name}</Text>
                 <Text style={styles.invSub}>
-                  {item.company} · SN {item.serialNumber} · ₹{item.mrp}
+                  {item.company} · {item.type} · SN {item.serialNumber} · ₹{item.mrp}
                 </Text>
               </TouchableOpacity>
             )}
