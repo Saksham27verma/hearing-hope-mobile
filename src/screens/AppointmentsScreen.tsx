@@ -18,11 +18,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAppointmentsContext } from '../context/AppointmentsContext';
 import type { Appointment } from '../types';
 import { theme } from '../theme';
+import { isPayableAppointmentForPayment } from '../utils/appointmentPayable';
 
 type TabFilter = 'all' | 'today' | 'upcoming' | 'completed' | 'cancelled';
 
 interface AppointmentsScreenProps {
   onAppointmentPress: (appointment: Appointment) => void;
+  onLogPayment?: (appointment: Appointment) => void;
   onLogout: () => void;
 }
 
@@ -113,7 +115,7 @@ function groupByDate(appointments: Appointment[]): GroupedSection[] {
   });
 }
 
-export default function AppointmentsScreen({ onAppointmentPress, onLogout }: AppointmentsScreenProps) {
+export default function AppointmentsScreen({ onAppointmentPress, onLogPayment, onLogout }: AppointmentsScreenProps) {
   const { appointments, loading, error, isOnline, refresh } = useAppointmentsContext();
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<TabFilter>('today');
@@ -193,6 +195,8 @@ export default function AppointmentsScreen({ onAppointmentPress, onLogout }: App
     const statusConfig = getStatusConfig(item.status);
     const isHomeVisit = item.type === 'home';
     const centerLabel = item.centerName || item.centerId || 'Center';
+    const showLogPayment =
+      activeTab === 'today' && Boolean(onLogPayment) && isPayableAppointmentForPayment(item);
     return (
       <TouchableOpacity
         style={styles.card}
@@ -253,6 +257,18 @@ export default function AppointmentsScreen({ onAppointmentPress, onLogout }: App
               <Ionicons name="navigate" size={18} color={item.address ? theme.colors.primary : theme.colors.textMuted} />
             </TouchableOpacity>
           )}
+          {showLogPayment ? (
+            <TouchableOpacity
+              style={styles.logPaymentBtn}
+              onPress={(e) => {
+                e?.stopPropagation?.();
+                onLogPayment?.(item);
+              }}
+            >
+              <Ionicons name="cash-outline" size={16} color="#fff" />
+              <Text style={styles.logPaymentBtnText}>Log payment</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       </TouchableOpacity>
     );
@@ -602,6 +618,21 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.backgroundSecondary,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  logPaymentBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: theme.colors.primary,
+    marginLeft: 'auto',
+  },
+  logPaymentBtnText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
   },
   centered: {
     flex: 1,

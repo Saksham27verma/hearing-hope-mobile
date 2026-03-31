@@ -10,11 +10,13 @@ import { setupPushNotifications } from './src/services/pushNotifications';
 import LoginScreen from './src/screens/LoginScreen';
 import AppointmentsScreen from './src/screens/AppointmentsScreen';
 import AppointmentDetailScreen from './src/screens/AppointmentDetailScreen';
+import ReceiptActionScreen from './src/screens/ReceiptActionScreen';
 import type { Appointment } from './src/types';
 
 export type RootStackParamList = {
   Appointments: undefined;
   AppointmentDetail: { appointment: Appointment };
+  ReceiptAction: { appointmentId: string };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -89,6 +91,9 @@ export default function App() {
                   onAppointmentPress={(apt) =>
                     props.navigation.navigate('AppointmentDetail', { appointment: apt })
                   }
+                  onLogPayment={(apt) =>
+                    props.navigation.navigate('ReceiptAction', { appointmentId: apt.id })
+                  }
                   onLogout={handleLogout}
                 />
               )}
@@ -97,6 +102,14 @@ export default function App() {
               {({ navigation, route }) => (
                 <AppointmentDetailScreen
                   appointment={route.params.appointment}
+                  onBack={() => navigation.goBack()}
+                />
+              )}
+            </Stack.Screen>
+            <Stack.Screen name="ReceiptAction">
+              {({ navigation, route }) => (
+                <ReceiptActionScreen
+                  appointmentId={route.params.appointmentId}
                   onBack={() => navigation.goBack()}
                 />
               )}
