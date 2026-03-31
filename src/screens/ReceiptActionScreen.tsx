@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,8 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  Modal,
+  FlatList,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,7 +19,12 @@ import type { Appointment } from '../types';
 import { theme } from '../theme';
 import { useAppointmentsContext } from '../context/AppointmentsContext';
 import { isPayableAppointmentForPayment } from '../utils/appointmentPayable';
-import { submitCollectPayment, type PaymentMode, type ReceiptType } from '../api/collectPayment';
+import {
+  submitCollectPayment,
+  type PaymentMode,
+  type ReceiptType,
+} from '../api/collectPayment';
+import { fetchAvailableInventory, type StaffInventoryRow } from '../api/staffInventory';
 
 function formatTime(iso: string) {
   if (!iso) return '—';
@@ -44,6 +51,13 @@ function getStartIso(appointment: Appointment): string {
   return d ? d.toISOString() : '';
 }
 
+function toYmd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 type Props = {
   appointmentId: string;
   onBack: () => void;
@@ -59,6 +73,66 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
   const [paymentMode, setPaymentMode] = useState<PaymentMode>('cash');
   const [receiptType, setReceiptType] = useState<ReceiptType>('booking');
   const [submitting, setSubmitting] = useState(false);
+
+  const [bookingBrand, setBookingBrand] = useState('');
+  const [bookingModel, setBookingModel] = useState('');
+  const [bookingDeviceType, setBookingDeviceType] = useState('RIC');
+  const [bookingEar, setBookingEar] = useState<'left' | 'right' | 'both'>('both');
+  const [bookingMrp, setBookingMrp] = useState('');
+  const [bookingSelling, setBookingSelling] = useState('');
+  const [bookingQty, setBookingQty] = useState('1');
+
+  const [trialBrand, setTrialBrand] = useState('');
+  const [trialModel, setTrialModel] = useState('');
+  const [trialDeviceType, setTrialDeviceType] = useState('RIC');
+  const [trialSerial, setTrialSerial] = useState('');
+  const [trialStart, setTrialStart] = useState(() => toYmd(new Date()));
+  const [trialEnd, setTrialEnd] = useState(() => {
+    const e = new Date();
+    e.setDate(e.getDate() + 7);
+    return toYmd(e);
+  });
+  const [trialDeposit, setTrialDeposit] = useState('');
+  const [trialNotes, setTrialNotes] = useState('');
+
+  const [inventoryItems, setInventoryItems] = useState<StaffInventoryRow[]>([]);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
+  const [invModal, setInvModal] = useState(false);
+  const [invSearch, setInvSearch] = useState('');
+  const [selectedInv, setSelectedInv] = useState<StaffInventoryRow | null>(null);
+  const [saleSelling, setSaleSelling] = useState('');
+  const [saleDiscount, setSaleDiscount] = useState('0');
+  const [saleGst, setSaleGst] = useState('18');
+  const [saleQty, setSaleQty] = useState('1');
+
+  const loadInventory = useCallback(async () => {
+    setInventoryLoading(true);
+    try {
+      const r = await fetchAvailableInventory();
+      if (r.ok && r.items) setInventoryItems(r.items);
+    } finally {
+      setInventoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (receiptType === 'invoice') {
+      void loadInventory();
+    }
+  }, [receiptType, loadInventory]);
+
+  const filteredInv = useMemo(() => {
+    const q = invSearch.trim().toLowerCase();
+    if (!q) return inventoryItems.slice(0, 80);
+    return inventoryItems
+      .filter(
+        (it) =>
+          it.name.toLowerCase().includes(q) ||
+          it.company.toLowerCase().includes(q) ||
+          it.serialNumber.toLowerCase().includes(q)
+      )
+      .slice(0, 80);
+  }, [inventoryItems, invSearch]);
 
   const fromCache = useMemo(
     () => appointments.find((a) => a.id === appointmentId) || null,
@@ -127,17 +201,116 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
   const handleSubmit = async () => {
     const n = Number(amount.replace(/,/g, '').trim());
     if (!Number.isFinite(n) || n <= 0) {
-      Alert.alert('Invalid amount', 'Enter a positive amount.');
+      Alert.alert('Invalid amount', 'Enter a positive amount (payment collected today).');
       return;
     }
     if (!resolved?.id) return;
+
+    if (receiptType === 'booking') {
+      if (!bookingBrand.trim() || !bookingModel.trim() || !bookingDeviceType.trim()) {
+        Alert.alert('Missing fields', 'Enter brand, model, and device type.');
+        return;
+      }
+      const mrp = Number(bookingMrp);
+      const sell = Number(bookingSelling);
+      const qty = Number(bookingQty);
+      if (!Number.isFinite(mrp) || mrp < 0 || !Number.isFinite(sell) || sell < 0) {
+        Alert.alert('Invalid prices', 'Enter valid MRP and selling price.');
+        return;
+      }
+      if (!Number.isFinite(qty) || qty < 1) {
+        Alert.alert('Invalid quantity', 'Enter quantity at least 1.');
+        return;
+      }
+    }
+
+    if (receiptType === 'trial') {
+      if (!trialBrand.trim() || !trialModel.trim() || !trialDeviceType.trim()) {
+        Alert.alert('Missing fields', 'Enter trial device brand, model, and type.');
+        return;
+      }
+      if (!trialStart.trim() || !trialEnd.trim()) {
+        Alert.alert('Missing dates', 'Enter trial start and end dates.');
+        return;
+      }
+      const dep = Number(trialDeposit);
+      if (!Number.isFinite(dep) || dep < 0) {
+        Alert.alert('Invalid deposit', 'Enter security deposit amount.');
+        return;
+      }
+    }
+
+    if (receiptType === 'invoice') {
+      if (!selectedInv) {
+        Alert.alert('Select device', 'Choose a hearing aid from inventory (serial).');
+        return;
+      }
+      const sp = Number(saleSelling);
+      const disc = Number(saleDiscount);
+      const gst = Number(saleGst);
+      const qty = Number(saleQty);
+      if (!Number.isFinite(sp) || sp < 0) {
+        Alert.alert('Invalid selling price', 'Enter selling price per unit.');
+        return;
+      }
+      if (!Number.isFinite(disc) || disc < 0 || disc > 100 || !Number.isFinite(gst) || gst < 0) {
+        Alert.alert('Invalid %', 'Check discount and GST.');
+        return;
+      }
+      if (!Number.isFinite(qty) || qty < 1) {
+        Alert.alert('Invalid quantity', 'Enter quantity.');
+        return;
+      }
+    }
+
     setSubmitting(true);
     try {
+      const details =
+        receiptType === 'booking'
+          ? {
+              booking: {
+                hearingAidBrand: bookingBrand.trim(),
+                hearingAidModel: bookingModel.trim(),
+                hearingAidType: bookingDeviceType.trim(),
+                whichEar: bookingEar,
+                hearingAidPrice: Number(bookingMrp),
+                bookingSellingPrice: Number(bookingSelling),
+                bookingQuantity: Math.max(1, Math.floor(Number(bookingQty) || 1)),
+              },
+            }
+          : receiptType === 'trial'
+            ? {
+                trial: {
+                  trialHearingAidBrand: trialBrand.trim(),
+                  trialHearingAidModel: trialModel.trim(),
+                  trialHearingAidType: trialDeviceType.trim(),
+                  trialSerialNumber: trialSerial.trim(),
+                  trialStartDate: trialStart.trim(),
+                  trialEndDate: trialEnd.trim(),
+                  trialHomeSecurityDepositAmount: Number(trialDeposit),
+                  trialNotes: trialNotes.trim(),
+                },
+              }
+            : {
+                sale: {
+                  productId: selectedInv!.productId,
+                  name: selectedInv!.name,
+                  company: selectedInv!.company,
+                  serialNumber: selectedInv!.serialNumber,
+                  mrp: selectedInv!.mrp,
+                  sellingPrice: Number(saleSelling),
+                  discountPercent: Number(saleDiscount),
+                  gstPercent: Number(saleGst),
+                  quantity: Math.max(1, Math.floor(Number(saleQty) || 1)),
+                },
+              };
+
       const result = await submitCollectPayment({
         appointmentId: resolved.id,
         amount: n,
         paymentMode,
         receiptType,
+        details,
       });
       if (!result.ok) {
         Alert.alert('Failed', result.error || 'Could not send request');
@@ -150,6 +323,12 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
       setSubmitting(false);
     }
   };
+
+  useEffect(() => {
+    if (selectedInv) {
+      setSaleSelling(String(selectedInv.mrp || 0));
+    }
+  }, [selectedInv]);
 
   if (loading || resolved === undefined) {
     return (
@@ -196,7 +375,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
           <Text style={styles.metaLine}>Time: {formatTime(getStartIso(resolved))}</Text>
         </View>
 
-        <Text style={styles.fieldLabel}>Amount (₹)</Text>
+        <Text style={styles.fieldLabel}>Payment collected today (₹)</Text>
         <TextInput
           style={styles.input}
           keyboardType="decimal-pad"
@@ -235,6 +414,77 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
           ))}
         </View>
 
+        {receiptType === 'booking' ? (
+          <View style={styles.block}>
+            <Text style={styles.blockTitle}>Booking (hearing aid)</Text>
+            <Field label="Brand" value={bookingBrand} onChangeText={setBookingBrand} />
+            <Field label="Model" value={bookingModel} onChangeText={setBookingModel} />
+            <Field label="Device type (e.g. RIC, BTE)" value={bookingDeviceType} onChangeText={setBookingDeviceType} />
+            <Text style={styles.fieldLabel}>Ear</Text>
+            <View style={styles.chipRow}>
+              {(['left', 'right', 'both'] as const).map((e) => (
+                <TouchableOpacity
+                  key={e}
+                  style={[styles.chip, bookingEar === e && styles.chipActive]}
+                  onPress={() => setBookingEar(e)}
+                >
+                  <Text style={[styles.chipText, bookingEar === e && styles.chipTextActive]}>{e}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Field label="MRP (per unit) ₹" value={bookingMrp} onChangeText={setBookingMrp} keyboardType="decimal-pad" />
+            <Field label="Selling price (per unit) ₹" value={bookingSelling} onChangeText={setBookingSelling} keyboardType="decimal-pad" />
+            <Field label="Quantity" value={bookingQty} onChangeText={setBookingQty} keyboardType="number-pad" />
+          </View>
+        ) : null}
+
+        {receiptType === 'trial' ? (
+          <View style={styles.block}>
+            <Text style={styles.blockTitle}>Trial device</Text>
+            <Field label="Brand" value={trialBrand} onChangeText={setTrialBrand} />
+            <Field label="Model" value={trialModel} onChangeText={setTrialModel} />
+            <Field label="Type (e.g. RIC)" value={trialDeviceType} onChangeText={setTrialDeviceType} />
+            <Field label="Serial (if issued)" value={trialSerial} onChangeText={setTrialSerial} />
+            <Field label="Start date (YYYY-MM-DD)" value={trialStart} onChangeText={setTrialStart} />
+            <Field label="End date (YYYY-MM-DD)" value={trialEnd} onChangeText={setTrialEnd} />
+            <Field label="Security deposit ₹" value={trialDeposit} onChangeText={setTrialDeposit} keyboardType="decimal-pad" />
+            <Text style={styles.fieldLabel}>Notes</Text>
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              placeholder="Optional"
+              value={trialNotes}
+              onChangeText={setTrialNotes}
+              multiline
+            />
+          </View>
+        ) : null}
+
+        {receiptType === 'invoice' ? (
+          <View style={styles.block}>
+            <Text style={styles.blockTitle}>Sale — inventory</Text>
+            <TouchableOpacity style={styles.pickBtn} onPress={() => setInvModal(true)} disabled={inventoryLoading}>
+              {inventoryLoading ? (
+                <ActivityIndicator color={theme.colors.primary} />
+              ) : (
+                <Text style={styles.pickBtnText}>
+                  {selectedInv
+                    ? `${selectedInv.name} · SN ${selectedInv.serialNumber}`
+                    : 'Select hearing aid (serial)'}
+                </Text>
+              )}
+            </TouchableOpacity>
+            {selectedInv ? (
+              <>
+                <Text style={styles.metaLine}>MRP: ₹{selectedInv.mrp}</Text>
+                <Field label="Selling price (per unit) ₹" value={saleSelling} onChangeText={setSaleSelling} keyboardType="decimal-pad" />
+                <Field label="Discount %" value={saleDiscount} onChangeText={setSaleDiscount} keyboardType="decimal-pad" />
+                <Field label="GST %" value={saleGst} onChangeText={setSaleGst} keyboardType="decimal-pad" />
+                <Field label="Quantity" value={saleQty} onChangeText={setSaleQty} keyboardType="number-pad" />
+              </>
+            ) : null}
+          </View>
+        ) : null}
+
         <TouchableOpacity
           style={[styles.submitBtn, submitting && styles.submitBtnDisabled]}
           onPress={() => void handleSubmit()}
@@ -247,7 +497,71 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
           )}
         </TouchableOpacity>
       </ScrollView>
+
+      <Modal visible={invModal} animationType="slide" onRequestClose={() => setInvModal(false)}>
+        <SafeAreaView style={styles.modalWrap}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setInvModal(false)}>
+              <Text style={styles.modalClose}>Close</Text>
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Available stock</Text>
+            <View style={{ width: 48 }} />
+          </View>
+          <TextInput
+            style={styles.input}
+            placeholder="Search name, company, serial"
+            value={invSearch}
+            onChangeText={setInvSearch}
+          />
+          <FlatList
+            data={filteredInv}
+            keyExtractor={(it) => it.lineId}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={styles.invRow}
+                onPress={() => {
+                  setSelectedInv(item);
+                  setInvModal(false);
+                }}
+              >
+                <Text style={styles.invName}>{item.name}</Text>
+                <Text style={styles.invSub}>
+                  {item.company} · SN {item.serialNumber} · ₹{item.mrp}
+                </Text>
+              </TouchableOpacity>
+            )}
+            ListEmptyComponent={
+              <Text style={styles.emptyInv}>{inventoryLoading ? 'Loading…' : 'No rows match.'}</Text>
+            }
+          />
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
+  );
+}
+
+function Field({
+  label,
+  value,
+  onChangeText,
+  keyboardType = 'default',
+}: {
+  label: string;
+  value: string;
+  onChangeText: (t: string) => void;
+  keyboardType?: 'default' | 'decimal-pad' | 'number-pad';
+}) {
+  return (
+    <>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <TextInput
+        style={styles.input}
+        value={value}
+        onChangeText={onChangeText}
+        keyboardType={keyboardType}
+        placeholderTextColor={theme.colors.textMuted}
+      />
+    </>
   );
 }
 
@@ -321,10 +635,14 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    fontSize: 18,
+    fontSize: 16,
     color: theme.colors.text,
     marginBottom: 16,
     backgroundColor: theme.colors.background,
+  },
+  textArea: {
+    minHeight: 80,
+    textAlignVertical: 'top',
   },
   chipRow: {
     flexDirection: 'row',
@@ -352,6 +670,28 @@ const styles = StyleSheet.create({
   chipTextActive: {
     color: theme.colors.primary,
   },
+  block: {
+    marginBottom: 8,
+  },
+  blockTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: theme.colors.text,
+    marginBottom: 12,
+  },
+  pickBtn: {
+    borderWidth: 1,
+    borderColor: theme.colors.primary,
+    borderRadius: 10,
+    padding: 14,
+    marginBottom: 12,
+    backgroundColor: theme.colors.background,
+  },
+  pickBtnText: {
+    color: theme.colors.primary,
+    fontWeight: '600',
+    fontSize: 15,
+  },
   submitBtn: {
     backgroundColor: theme.colors.primary,
     borderRadius: 12,
@@ -366,5 +706,45 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  modalWrap: {
+    flex: 1,
+    backgroundColor: theme.colors.backgroundSecondary,
+    padding: 16,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  modalClose: {
+    color: theme.colors.primary,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  invRow: {
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.colors.border,
+  },
+  invName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: theme.colors.text,
+  },
+  invSub: {
+    fontSize: 13,
+    color: theme.colors.textSecondary,
+    marginTop: 4,
+  },
+  emptyInv: {
+    textAlign: 'center',
+    marginTop: 24,
+    color: theme.colors.textMuted,
   },
 });
