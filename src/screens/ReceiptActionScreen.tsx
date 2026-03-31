@@ -25,6 +25,8 @@ import {
   type ReceiptType,
 } from '../api/collectPayment';
 import { fetchAvailableInventory, type StaffInventoryRow } from '../api/staffInventory';
+import { fetchStaffEnquiryConfig, type FieldOption } from '../api/staffEnquiryConfig';
+import { fetchStaffProductsCatalog, type CatalogProduct } from '../api/staffProductsCatalog';
 
 function formatTime(iso: string) {
   if (!iso) return '—';
@@ -58,6 +60,17 @@ function toYmd(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+const FALLBACK_EAR: FieldOption[] = [
+  { optionValue: 'left', optionLabel: 'Left', sortOrder: 10 },
+  { optionValue: 'right', optionLabel: 'Right', sortOrder: 20 },
+  { optionValue: 'both', optionLabel: 'Both', sortOrder: 30 },
+];
+
+const FALLBACK_TRIAL_LOC: FieldOption[] = [
+  { optionValue: 'in_office', optionLabel: 'In-Office Trial', sortOrder: 10 },
+  { optionValue: 'home', optionLabel: 'Home Trial', sortOrder: 20 },
+];
+
 type Props = {
   appointmentId: string;
   onBack: () => void;
@@ -74,24 +87,27 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
   const [receiptType, setReceiptType] = useState<ReceiptType>('booking');
   const [submitting, setSubmitting] = useState(false);
 
-  const [bookingBrand, setBookingBrand] = useState('');
-  const [bookingModel, setBookingModel] = useState('');
-  const [bookingDeviceType, setBookingDeviceType] = useState('RIC');
-  const [bookingEar, setBookingEar] = useState<'left' | 'right' | 'both'>('both');
+  const [earOptions, setEarOptions] = useState<FieldOption[]>(FALLBACK_EAR);
+  const [trialLocOptions, setTrialLocOptions] = useState<FieldOption[]>(FALLBACK_TRIAL_LOC);
+
+  const [bookingProduct, setBookingProduct] = useState<CatalogProduct | null>(null);
+  const [bookingEar, setBookingEar] = useState('both');
   const [bookingMrp, setBookingMrp] = useState('');
   const [bookingSelling, setBookingSelling] = useState('');
   const [bookingQty, setBookingQty] = useState('1');
 
-  const [trialBrand, setTrialBrand] = useState('');
-  const [trialModel, setTrialModel] = useState('');
-  const [trialDeviceType, setTrialDeviceType] = useState('RIC');
-  const [trialSerial, setTrialSerial] = useState('');
+  const [trialProduct, setTrialProduct] = useState<CatalogProduct | null>(null);
+  const [trialLoc, setTrialLoc] = useState<'in_office' | 'home'>('in_office');
+  const [trialEar, setTrialEar] = useState('both');
+  const [trialMrp, setTrialMrp] = useState('');
+  const [trialDuration, setTrialDuration] = useState('7');
   const [trialStart, setTrialStart] = useState(() => toYmd(new Date()));
   const [trialEnd, setTrialEnd] = useState(() => {
     const e = new Date();
     e.setDate(e.getDate() + 7);
     return toYmd(e);
   });
+  const [trialSerial, setTrialSerial] = useState('');
   const [trialDeposit, setTrialDeposit] = useState('');
   const [trialNotes, setTrialNotes] = useState('');
 
@@ -100,10 +116,17 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
   const [invModal, setInvModal] = useState(false);
   const [invSearch, setInvSearch] = useState('');
   const [selectedInv, setSelectedInv] = useState<StaffInventoryRow | null>(null);
+  const [saleEar, setSaleEar] = useState('both');
   const [saleSelling, setSaleSelling] = useState('');
   const [saleDiscount, setSaleDiscount] = useState('0');
   const [saleGst, setSaleGst] = useState('18');
   const [saleQty, setSaleQty] = useState('1');
+
+  const [catalogModal, setCatalogModal] = useState(false);
+  const [catalogIntent, setCatalogIntent] = useState<'booking' | 'trial'>('booking');
+  const [catalogSearch, setCatalogSearch] = useState('');
+  const [catalogItems, setCatalogItems] = useState<CatalogProduct[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
 
   const loadInventory = useCallback(async () => {
     setInventoryLoading(true);
@@ -116,15 +139,46 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
   }, []);
 
   useEffect(() => {
-    if (receiptType === 'invoice') {
+    void (async () => {
+      const r = await fetchStaffEnquiryConfig();
+      if (r.ok) {
+        if (r.earSide?.length) setEarOptions(r.earSide);
+        if (r.trialLocationType?.length) setTrialLocOptions(r.trialLocationType);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (receiptType === 'invoice' || (receiptType === 'trial' && trialLoc === 'home')) {
       void loadInventory();
     }
-  }, [receiptType, loadInventory]);
+  }, [receiptType, trialLoc, loadInventory]);
+
+  const loadCatalog = useCallback(async (q: string) => {
+    setCatalogLoading(true);
+    try {
+      const r = await fetchStaffProductsCatalog(q);
+      if (r.ok && r.products) setCatalogItems(r.products);
+      else setCatalogItems([]);
+    } finally {
+      setCatalogLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!catalogModal) return;
+    const t = setTimeout(() => void loadCatalog(catalogSearch), 300);
+    return () => clearTimeout(t);
+  }, [catalogModal, catalogSearch, loadCatalog]);
 
   const filteredInv = useMemo(() => {
+    let base = inventoryItems;
+    if (receiptType === 'trial' && trialLoc === 'home' && trialProduct) {
+      base = base.filter((it) => it.productId === trialProduct.id);
+    }
     const q = invSearch.trim().toLowerCase();
-    if (!q) return inventoryItems.slice(0, 80);
-    return inventoryItems
+    if (!q) return base.slice(0, 80);
+    return base
       .filter(
         (it) =>
           it.name.toLowerCase().includes(q) ||
@@ -132,7 +186,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
           it.serialNumber.toLowerCase().includes(q)
       )
       .slice(0, 80);
-  }, [inventoryItems, invSearch]);
+  }, [inventoryItems, invSearch, receiptType, trialLoc, trialProduct]);
 
   const fromCache = useMemo(
     () => appointments.find((a) => a.id === appointmentId) || null,
@@ -198,6 +252,53 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
     }
   }, [resolved, loading, onBack]);
 
+  useEffect(() => {
+    if (bookingProduct) {
+      const m = String(bookingProduct.mrp ?? 0);
+      setBookingMrp(m);
+      setBookingSelling(m);
+    }
+  }, [bookingProduct]);
+
+  useEffect(() => {
+    if (trialProduct) {
+      const m = String(trialProduct.mrp ?? 0);
+      setTrialMrp(m);
+    }
+  }, [trialProduct]);
+
+  useEffect(() => {
+    if (trialLoc === 'in_office') {
+      setTrialDuration('0');
+      setTrialStart('');
+      setTrialEnd('');
+      setTrialSerial('');
+      setTrialDeposit('0');
+    } else {
+      setTrialDuration((d) => (d === '0' ? '7' : d));
+      if (!trialStart) setTrialStart(toYmd(new Date()));
+    }
+  }, [trialLoc]);
+
+  useEffect(() => {
+    const d = Number(trialDuration);
+    const start = trialStart.trim();
+    if (trialLoc === 'home' && Number.isFinite(d) && d > 0 && start) {
+      const sd = new Date(start + 'T12:00:00');
+      if (!Number.isNaN(sd.getTime())) {
+        const ed = new Date(sd.getTime() + d * 24 * 60 * 60 * 1000);
+        setTrialEnd(toYmd(ed));
+      }
+    }
+  }, [trialDuration, trialStart, trialLoc]);
+
+  const openCatalog = (intent: 'booking' | 'trial') => {
+    setCatalogIntent(intent);
+    setCatalogSearch('');
+    setCatalogModal(true);
+    void loadCatalog('');
+  };
+
   const handleSubmit = async () => {
     const n = Number(amount.replace(/,/g, '').trim());
     if (!Number.isFinite(n) || n <= 0) {
@@ -207,8 +308,8 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
     if (!resolved?.id) return;
 
     if (receiptType === 'booking') {
-      if (!bookingBrand.trim() || !bookingModel.trim() || !bookingDeviceType.trim()) {
-        Alert.alert('Missing fields', 'Enter brand, model, and device type.');
+      if (!bookingProduct) {
+        Alert.alert('Select device', 'Choose a hearing aid from the product catalog (same as CRM).');
         return;
       }
       const mrp = Number(bookingMrp);
@@ -225,18 +326,34 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
     }
 
     if (receiptType === 'trial') {
-      if (!trialBrand.trim() || !trialModel.trim() || !trialDeviceType.trim()) {
-        Alert.alert('Missing fields', 'Enter trial device brand, model, and type.');
+      if (!trialProduct) {
+        Alert.alert('Select device', 'Choose a hearing aid from the product catalog (same as CRM).');
         return;
       }
-      if (!trialStart.trim() || !trialEnd.trim()) {
-        Alert.alert('Missing dates', 'Enter trial start and end dates.');
+      const mrp = Number(trialMrp);
+      if (!Number.isFinite(mrp) || mrp < 0) {
+        Alert.alert('Invalid MRP', 'Enter MRP per unit.');
         return;
       }
-      const dep = Number(trialDeposit);
-      if (!Number.isFinite(dep) || dep < 0) {
-        Alert.alert('Invalid deposit', 'Enter security deposit amount.');
-        return;
+      if (trialLoc === 'home') {
+        const dur = Number(trialDuration);
+        if (!Number.isFinite(dur) || dur < 1) {
+          Alert.alert('Trial period', 'Enter trial duration in days (home trial).');
+          return;
+        }
+        if (!trialStart.trim() || !trialEnd.trim()) {
+          Alert.alert('Dates', 'Enter trial start and end dates.');
+          return;
+        }
+        if (!trialSerial.trim()) {
+          Alert.alert('Serial', 'Select or enter the inventory serial for home trial.');
+          return;
+        }
+        const dep = Number(trialDeposit);
+        if (!Number.isFinite(dep) || dep < 0) {
+          Alert.alert('Deposit', 'Enter security deposit amount.');
+          return;
+        }
       }
     }
 
@@ -269,10 +386,8 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
         receiptType === 'booking'
           ? {
               booking: {
-                hearingAidBrand: bookingBrand.trim(),
-                hearingAidModel: bookingModel.trim(),
-                hearingAidType: bookingDeviceType.trim(),
-                whichEar: bookingEar,
+                catalogProductId: bookingProduct!.id,
+                whichEar: bookingEar as 'left' | 'right' | 'both',
                 hearingAidPrice: Number(bookingMrp),
                 bookingSellingPrice: Number(bookingSelling),
                 bookingQuantity: Math.max(1, Math.floor(Number(bookingQty) || 1)),
@@ -281,13 +396,15 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
           : receiptType === 'trial'
             ? {
                 trial: {
-                  trialHearingAidBrand: trialBrand.trim(),
-                  trialHearingAidModel: trialModel.trim(),
-                  trialHearingAidType: trialDeviceType.trim(),
-                  trialSerialNumber: trialSerial.trim(),
-                  trialStartDate: trialStart.trim(),
-                  trialEndDate: trialEnd.trim(),
-                  trialHomeSecurityDepositAmount: Number(trialDeposit),
+                  catalogProductId: trialProduct!.id,
+                  trialLocationType: trialLoc,
+                  whichEar: trialEar as 'left' | 'right' | 'both',
+                  hearingAidPrice: Number(trialMrp),
+                  trialDuration: trialLoc === 'home' ? Math.max(1, Math.floor(Number(trialDuration) || 1)) : 0,
+                  trialStartDate: trialLoc === 'home' ? trialStart.trim() : '',
+                  trialEndDate: trialLoc === 'home' ? trialEnd.trim() : '',
+                  trialSerialNumber: trialLoc === 'home' ? trialSerial.trim() : '',
+                  trialHomeSecurityDepositAmount: trialLoc === 'home' ? Number(trialDeposit) : 0,
                   trialNotes: trialNotes.trim(),
                 },
               }
@@ -302,6 +419,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
                   discountPercent: Number(saleDiscount),
                   gstPercent: Number(saleGst),
                   quantity: Math.max(1, Math.floor(Number(saleQty) || 1)),
+                  whichEar: saleEar as 'left' | 'right' | 'both',
                 },
               };
 
@@ -416,19 +534,23 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
 
         {receiptType === 'booking' ? (
           <View style={styles.block}>
-            <Text style={styles.blockTitle}>Booking (hearing aid)</Text>
-            <Field label="Brand" value={bookingBrand} onChangeText={setBookingBrand} />
-            <Field label="Model" value={bookingModel} onChangeText={setBookingModel} />
-            <Field label="Device type (e.g. RIC, BTE)" value={bookingDeviceType} onChangeText={setBookingDeviceType} />
-            <Text style={styles.fieldLabel}>Ear</Text>
+            <Text style={styles.blockTitle}>Booking — catalog device (CRM)</Text>
+            <TouchableOpacity style={styles.pickBtn} onPress={() => openCatalog('booking')} disabled={submitting}>
+              <Text style={styles.pickBtnText}>
+                {bookingProduct
+                  ? `${bookingProduct.company} · ${bookingProduct.name} (${bookingProduct.type})`
+                  : 'Select from product catalog'}
+              </Text>
+            </TouchableOpacity>
+            <Text style={styles.fieldLabel}>Which ear</Text>
             <View style={styles.chipRow}>
-              {(['left', 'right', 'both'] as const).map((e) => (
+              {earOptions.map((o) => (
                 <TouchableOpacity
-                  key={e}
-                  style={[styles.chip, bookingEar === e && styles.chipActive]}
-                  onPress={() => setBookingEar(e)}
+                  key={o.optionValue}
+                  style={[styles.chip, bookingEar === o.optionValue && styles.chipActive]}
+                  onPress={() => setBookingEar(o.optionValue)}
                 >
-                  <Text style={[styles.chipText, bookingEar === e && styles.chipTextActive]}>{e}</Text>
+                  <Text style={[styles.chipText, bookingEar === o.optionValue && styles.chipTextActive]}>{o.optionLabel}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -440,15 +562,61 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
 
         {receiptType === 'trial' ? (
           <View style={styles.block}>
-            <Text style={styles.blockTitle}>Trial device</Text>
-            <Field label="Brand" value={trialBrand} onChangeText={setTrialBrand} />
-            <Field label="Model" value={trialModel} onChangeText={setTrialModel} />
-            <Field label="Type (e.g. RIC)" value={trialDeviceType} onChangeText={setTrialDeviceType} />
-            <Field label="Serial (if issued)" value={trialSerial} onChangeText={setTrialSerial} />
-            <Field label="Start date (YYYY-MM-DD)" value={trialStart} onChangeText={setTrialStart} />
-            <Field label="End date (YYYY-MM-DD)" value={trialEnd} onChangeText={setTrialEnd} />
-            <Field label="Security deposit ₹" value={trialDeposit} onChangeText={setTrialDeposit} keyboardType="decimal-pad" />
-            <Text style={styles.fieldLabel}>Notes</Text>
+            <Text style={styles.blockTitle}>Trial — catalog + trial type (CRM)</Text>
+            <TouchableOpacity style={styles.pickBtn} onPress={() => openCatalog('trial')} disabled={submitting}>
+              <Text style={styles.pickBtnText}>
+                {trialProduct
+                  ? `${trialProduct.company} · ${trialProduct.name} (${trialProduct.type})`
+                  : 'Select from product catalog'}
+              </Text>
+            </TouchableOpacity>
+            <Text style={styles.fieldLabel}>Trial type</Text>
+            <View style={styles.chipRow}>
+              {trialLocOptions.map((o) => {
+                const v = (o.optionValue === 'home' ? 'home' : 'in_office') as 'in_office' | 'home';
+                const active = trialLoc === v;
+                return (
+                  <TouchableOpacity
+                    key={o.optionValue}
+                    style={[styles.chip, active && styles.chipActive]}
+                    onPress={() => setTrialLoc(v)}
+                  >
+                    <Text style={[styles.chipText, active && styles.chipTextActive]}>{o.optionLabel}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={styles.fieldLabel}>Which ear</Text>
+            <View style={styles.chipRow}>
+              {earOptions.map((o) => (
+                <TouchableOpacity
+                  key={o.optionValue}
+                  style={[styles.chip, trialEar === o.optionValue && styles.chipActive]}
+                  onPress={() => setTrialEar(o.optionValue)}
+                >
+                  <Text style={[styles.chipText, trialEar === o.optionValue && styles.chipTextActive]}>{o.optionLabel}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Field label="MRP (per unit) ₹" value={trialMrp} onChangeText={setTrialMrp} keyboardType="decimal-pad" />
+            {trialLoc === 'home' ? (
+              <>
+                <Field label="Trial period (days)" value={trialDuration} onChangeText={setTrialDuration} keyboardType="number-pad" />
+                <Field label="Trial start (YYYY-MM-DD)" value={trialStart} onChangeText={setTrialStart} />
+                <Field label="Trial end (YYYY-MM-DD)" value={trialEnd} onChangeText={setTrialEnd} />
+                <TouchableOpacity style={styles.pickBtn} onPress={() => setInvModal(true)} disabled={inventoryLoading}>
+                  {inventoryLoading ? (
+                    <ActivityIndicator color={theme.colors.primary} />
+                  ) : (
+                    <Text style={styles.pickBtnText}>
+                      {trialSerial ? `Serial: ${trialSerial}` : 'Select serial from inventory'}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+                <Field label="Security deposit ₹" value={trialDeposit} onChangeText={setTrialDeposit} keyboardType="decimal-pad" />
+              </>
+            ) : null}
+            <Text style={styles.fieldLabel}>Trial notes</Text>
             <TextInput
               style={[styles.input, styles.textArea]}
               placeholder="Optional"
@@ -461,15 +629,25 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
 
         {receiptType === 'invoice' ? (
           <View style={styles.block}>
-            <Text style={styles.blockTitle}>Sale — inventory</Text>
+            <Text style={styles.blockTitle}>Sale — inventory (CRM)</Text>
+            <Text style={styles.fieldLabel}>Which ear</Text>
+            <View style={styles.chipRow}>
+              {earOptions.map((o) => (
+                <TouchableOpacity
+                  key={o.optionValue}
+                  style={[styles.chip, saleEar === o.optionValue && styles.chipActive]}
+                  onPress={() => setSaleEar(o.optionValue)}
+                >
+                  <Text style={[styles.chipText, saleEar === o.optionValue && styles.chipTextActive]}>{o.optionLabel}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
             <TouchableOpacity style={styles.pickBtn} onPress={() => setInvModal(true)} disabled={inventoryLoading}>
               {inventoryLoading ? (
                 <ActivityIndicator color={theme.colors.primary} />
               ) : (
                 <Text style={styles.pickBtnText}>
-                  {selectedInv
-                    ? `${selectedInv.name} · SN ${selectedInv.serialNumber}`
-                    : 'Select hearing aid (serial)'}
+                  {selectedInv ? `${selectedInv.name} · SN ${selectedInv.serialNumber}` : 'Select hearing aid (serial)'}
                 </Text>
               )}
             </TouchableOpacity>
@@ -498,6 +676,48 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
         </TouchableOpacity>
       </ScrollView>
 
+      <Modal visible={catalogModal} animationType="slide" onRequestClose={() => setCatalogModal(false)}>
+        <SafeAreaView style={styles.modalWrap}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setCatalogModal(false)}>
+              <Text style={styles.modalClose}>Close</Text>
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Product catalog</Text>
+            <View style={{ width: 48 }} />
+          </View>
+          <TextInput
+            style={styles.input}
+            placeholder="Search company, model, type"
+            value={catalogSearch}
+            onChangeText={setCatalogSearch}
+          />
+          {catalogLoading ? (
+            <ActivityIndicator style={{ marginTop: 16 }} color={theme.colors.primary} />
+          ) : (
+            <FlatList
+              data={catalogItems}
+              keyExtractor={(it) => it.id}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.invRow}
+                  onPress={() => {
+                    if (catalogIntent === 'booking') setBookingProduct(item);
+                    else setTrialProduct(item);
+                    setCatalogModal(false);
+                  }}
+                >
+                  <Text style={styles.invName}>{item.name}</Text>
+                  <Text style={styles.invSub}>
+                    {item.company} · {item.type} · ₹{item.mrp ?? 0}
+                  </Text>
+                </TouchableOpacity>
+              )}
+              ListEmptyComponent={<Text style={styles.emptyInv}>No products. Try search.</Text>}
+            />
+          )}
+        </SafeAreaView>
+      </Modal>
+
       <Modal visible={invModal} animationType="slide" onRequestClose={() => setInvModal(false)}>
         <SafeAreaView style={styles.modalWrap}>
           <View style={styles.modalHeader}>
@@ -520,7 +740,11 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
               <TouchableOpacity
                 style={styles.invRow}
                 onPress={() => {
-                  setSelectedInv(item);
+                  if (receiptType === 'invoice') {
+                    setSelectedInv(item);
+                  } else if (receiptType === 'trial' && trialLoc === 'home') {
+                    setTrialSerial(item.serialNumber);
+                  }
                   setInvModal(false);
                 }}
               >

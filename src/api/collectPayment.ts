@@ -5,23 +5,25 @@ const getCrmUrl = () => process.env.EXPO_PUBLIC_CRM_URL || 'http://localhost:300
 export type ReceiptType = 'trial' | 'booking' | 'invoice';
 export type PaymentMode = 'cash' | 'upi' | 'card';
 
+/** Matches CRM enquiry catalog + booking fields (device comes from `catalogProductId` on server). */
 export type CollectPaymentBookingDetails = {
-  hearingAidBrand: string;
-  hearingAidModel: string;
-  hearingAidType: string;
+  catalogProductId: string;
   whichEar: 'left' | 'right' | 'both';
   hearingAidPrice: number;
   bookingSellingPrice: number;
   bookingQuantity: number;
 };
 
+/** `trialLocationType` is CRM `trialHearingAidType` (in_office | home). Device from catalog. */
 export type CollectPaymentTrialDetails = {
-  trialHearingAidBrand: string;
-  trialHearingAidModel: string;
-  trialHearingAidType: string;
-  trialSerialNumber: string;
+  catalogProductId: string;
+  trialLocationType: 'in_office' | 'home';
+  whichEar: 'left' | 'right' | 'both';
+  hearingAidPrice: number;
+  trialDuration: number;
   trialStartDate: string;
   trialEndDate: string;
+  trialSerialNumber: string;
   trialHomeSecurityDepositAmount: number;
   trialNotes: string;
 };
@@ -36,6 +38,7 @@ export type CollectPaymentSaleDetails = {
   discountPercent: number;
   gstPercent: number;
   quantity: number;
+  whichEar: 'left' | 'right' | 'both';
 };
 
 export type CollectPaymentDetails = {
