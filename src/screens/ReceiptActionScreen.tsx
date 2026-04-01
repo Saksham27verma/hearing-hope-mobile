@@ -78,7 +78,14 @@ const FALLBACK_TRIAL_LOC: FieldOption[] = [
   { optionValue: 'home', optionLabel: 'Home Trial', sortOrder: 20 },
 ];
 
-type HtEntry = { id: string; testType: string; price: string };
+/** Same product-type filter as CRM accessory service picker (`SimplifiedEnquiryForm`). */
+const ACCESSORY_CATALOG_TYPES = ['Accessory', 'Battery', 'Charger', 'Other'] as const;
+
+function isAccessoryCatalogProduct(p: CatalogProduct): boolean {
+  return (ACCESSORY_CATALOG_TYPES as readonly string[]).includes(p.type);
+}
+
+type HtEntry = { id: string; testType: string; price: string; testTypeCustom?: boolean };
 
 function newHtId() {
   return `ht-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -103,7 +110,9 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
   const [templateLabels, setTemplateLabels] = useState<StaffReceiptTemplateLabels>({});
 
   const [hearingTest, setHearingTest] = useState(false);
-  const [htEntries, setHtEntries] = useState<HtEntry[]>([{ id: newHtId(), testType: '', price: '' }]);
+  const [htEntries, setHtEntries] = useState<HtEntry[]>([
+    { id: newHtId(), testType: '', price: '', testTypeCustom: false },
+  ]);
   const [testDoneBy, setTestDoneBy] = useState('');
   const [testResults, setTestResults] = useState('');
   const [recommendations, setRecommendations] = useState('');
@@ -126,6 +135,22 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
 
   const [earOptions, setEarOptions] = useState<FieldOption[]>(FALLBACK_EAR);
   const [trialLocOptions, setTrialLocOptions] = useState<FieldOption[]>(FALLBACK_TRIAL_LOC);
+  const [hearingTestTypeOptions, setHearingTestTypeOptions] = useState<FieldOption[]>([]);
+  const [staffNames, setStaffNames] = useState<string[]>([]);
+
+  const [selectModal, setSelectModal] = useState<
+    null | { kind: 'ht'; rowId: string } | { kind: 'staff_test' } | { kind: 'staff_prog' }
+  >(null);
+  const [optionSearch, setOptionSearch] = useState('');
+  const [staffCustomDraft, setStaffCustomDraft] = useState('');
+
+  const [accessoryCatalogModal, setAccessoryCatalogModal] = useState(false);
+  const [accessoryCatalogSearch, setAccessoryCatalogSearch] = useState('');
+  const [accessoryCatalogItems, setAccessoryCatalogItems] = useState<CatalogProduct[]>([]);
+  const [accessoryCatalogLoading, setAccessoryCatalogLoading] = useState(false);
+
+  /** Collapsible visit-service panels — expand when a section is turned on. */
+  const [vsOpen, setVsOpen] = useState({ ht: true, acc: false, prog: false, cou: false });
 
   const [bookingProduct, setBookingProduct] = useState<CatalogProduct | null>(null);
   const [bookingEar, setBookingEar] = useState('both');
@@ -181,9 +206,74 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
       if (r.ok) {
         if (r.earSide?.length) setEarOptions(r.earSide);
         if (r.trialLocationType?.length) setTrialLocOptions(r.trialLocationType);
+        if (r.hearingTestType?.length) setHearingTestTypeOptions(r.hearingTestType);
+        if (r.staffNames?.length) setStaffNames(r.staffNames);
       }
     })();
   }, []);
+
+  useEffect(() => {
+    if (hearingTest) setVsOpen((o) => ({ ...o, ht: true }));
+  }, [hearingTest]);
+  useEffect(() => {
+    if (accessory) setVsOpen((o) => ({ ...o, acc: true }));
+  }, [accessory]);
+  useEffect(() => {
+    if (programming) setVsOpen((o) => ({ ...o, prog: true }));
+  }, [programming]);
+  useEffect(() => {
+    if (counselling) setVsOpen((o) => ({ ...o, cou: true }));
+  }, [counselling]);
+
+  useEffect(() => {
+    if (selectModal) {
+      setOptionSearch('');
+      setStaffCustomDraft('');
+    }
+  }, [selectModal]);
+
+  const loadAccessoryCatalog = useCallback(async (q: string) => {
+    setAccessoryCatalogLoading(true);
+    try {
+      const r = await fetchStaffProductsCatalog(q);
+      if (r.ok && r.products) {
+        setAccessoryCatalogItems(r.products.filter(isAccessoryCatalogProduct));
+      } else setAccessoryCatalogItems([]);
+    } finally {
+      setAccessoryCatalogLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!accessoryCatalogModal) return;
+    const delay = accessoryCatalogSearch.trim() ? 300 : 0;
+    const t = setTimeout(() => void loadAccessoryCatalog(accessoryCatalogSearch), delay);
+    return () => clearTimeout(t);
+  }, [accessoryCatalogModal, accessoryCatalogSearch, loadAccessoryCatalog]);
+
+  const filteredHtOptions = useMemo(() => {
+    const q = optionSearch.trim().toLowerCase();
+    const base = [...hearingTestTypeOptions].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+    if (!q) return base;
+    return base.filter(
+      (o) => o.optionLabel.toLowerCase().includes(q) || o.optionValue.toLowerCase().includes(q)
+    );
+  }, [hearingTestTypeOptions, optionSearch]);
+
+  const filteredStaffModal = useMemo(() => {
+    const q = optionSearch.trim().toLowerCase();
+    if (!q) return staffNames;
+    return staffNames.filter((s) => s.toLowerCase().includes(q));
+  }, [staffNames, optionSearch]);
+
+  const resolveHtLabel = useCallback(
+    (row: HtEntry) => {
+      if (row.testTypeCustom) return row.testType.trim() || 'Custom type';
+      const o = hearingTestTypeOptions.find((x) => x.optionValue === row.testType);
+      return o?.optionLabel || row.testType || 'Select test type';
+    },
+    [hearingTestTypeOptions]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -653,8 +743,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
 
         <Text style={styles.blockTitle}>Visit services (CRM)</Text>
         <Text style={styles.visitHint}>
-          Log tests, accessories, programming, and counselling here. Requires internet. Link the appointment to an enquiry
-          in CRM if missing.
+          Use the same test types and staff names as the CRM enquiry form. Requires internet. Link an enquiry if missing.
         </Text>
         {!resolved.enquiryId?.trim() ? (
           <Text style={styles.visitMuted}>
@@ -663,58 +752,116 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
         ) : !showVisitServicesForm ? (
           <Text style={styles.visitMuted}>Visit services are not available for this appointment.</Text>
         ) : (
-          <>
+          <View style={styles.visitServicesShell}>
             <View style={[styles.card, styles.visitCard]}>
               <View style={styles.visitRowBetween}>
-                <Text style={styles.vsSectionTitle}>Hearing test</Text>
+                <TouchableOpacity
+                  style={styles.vsSectionHeaderTap}
+                  onPress={() => setVsOpen((o) => ({ ...o, ht: !o.ht }))}
+                  disabled={visitFormBusy}
+                  hitSlop={{ top: 8, bottom: 8 }}
+                >
+                  <Ionicons
+                    name={vsOpen.ht ? 'chevron-down' : 'chevron-forward'}
+                    size={18}
+                    color={theme.colors.textMuted}
+                  />
+                  <Text style={styles.vsSectionTitle}>Hearing test</Text>
+                </TouchableOpacity>
                 <Switch value={hearingTest} onValueChange={setHearingTest} disabled={visitFormBusy} />
               </View>
-              {hearingTest ? (
+              {hearingTest && vsOpen.ht ? (
                 <>
                   {htEntries.map((row, idx) => (
-                    <View key={row.id} style={styles.htRow}>
-                      <TextInput
-                        style={[styles.input, styles.vsFlex]}
-                        placeholder="Test type"
-                        placeholderTextColor={theme.colors.textMuted}
-                        value={row.testType}
-                        onChangeText={(t) => {
-                          const next = [...htEntries];
-                          next[idx] = { ...row, testType: t };
-                          setHtEntries(next);
-                        }}
-                        editable={!visitFormBusy}
-                      />
-                      <TextInput
-                        style={[styles.input, styles.vsPrice]}
-                        placeholder="₹"
-                        placeholderTextColor={theme.colors.textMuted}
-                        keyboardType="decimal-pad"
-                        value={row.price}
-                        onChangeText={(t) => {
-                          const next = [...htEntries];
-                          next[idx] = { ...row, price: t };
-                          setHtEntries(next);
-                        }}
-                        editable={!visitFormBusy}
-                      />
-                      <TouchableOpacity
-                        onPress={() => setHtEntries((prev) => prev.filter((r) => r.id !== row.id))}
-                        disabled={htEntries.length <= 1 || visitFormBusy}
-                      >
-                        <Ionicons name="trash-outline" size={22} color={theme.colors.error} />
-                      </TouchableOpacity>
+                    <View key={row.id} style={styles.htBlock}>
+                      <View style={styles.htRow}>
+                        <View style={[styles.vsFlex, styles.vsMinW]}>
+                          {row.testTypeCustom ? (
+                            <TextInput
+                              style={[styles.input, styles.vsInputNoMb]}
+                              placeholder="Custom test type"
+                              placeholderTextColor={theme.colors.textMuted}
+                              value={row.testType}
+                              onChangeText={(t) => {
+                                const next = [...htEntries];
+                                next[idx] = { ...row, testType: t };
+                                setHtEntries(next);
+                              }}
+                              editable={!visitFormBusy}
+                            />
+                          ) : (
+                            <TouchableOpacity
+                              style={styles.vsPickerBtn}
+                              onPress={() => setSelectModal({ kind: 'ht', rowId: row.id })}
+                              disabled={visitFormBusy}
+                            >
+                              <Text style={styles.vsPickerBtnText} numberOfLines={2}>
+                                {resolveHtLabel(row)}
+                              </Text>
+                              <Ionicons name="chevron-down" size={18} color={theme.colors.primary} />
+                            </TouchableOpacity>
+                          )}
+                          <TouchableOpacity
+                            onPress={() => {
+                              const next = [...htEntries];
+                              next[idx] = {
+                                ...row,
+                                testTypeCustom: !row.testTypeCustom,
+                                testType: row.testTypeCustom ? '' : row.testType,
+                              };
+                              setHtEntries(next);
+                            }}
+                            disabled={visitFormBusy}
+                          >
+                            <Text style={styles.vsToggleLink}>{row.testTypeCustom ? 'Use CRM list' : 'Custom'}</Text>
+                          </TouchableOpacity>
+                        </View>
+                        <TextInput
+                          style={[styles.input, styles.vsPrice]}
+                          placeholder="₹"
+                          placeholderTextColor={theme.colors.textMuted}
+                          keyboardType="decimal-pad"
+                          value={row.price}
+                          onChangeText={(t) => {
+                            const next = [...htEntries];
+                            next[idx] = { ...row, price: t };
+                            setHtEntries(next);
+                          }}
+                          editable={!visitFormBusy}
+                        />
+                        <TouchableOpacity
+                          onPress={() => setHtEntries((prev) => prev.filter((r) => r.id !== row.id))}
+                          disabled={htEntries.length <= 1 || visitFormBusy}
+                        >
+                          <Ionicons name="trash-outline" size={22} color={theme.colors.error} />
+                        </TouchableOpacity>
+                      </View>
                     </View>
                   ))}
                   <TouchableOpacity
                     style={styles.vsAddRow}
-                    onPress={() => setHtEntries((prev) => [...prev, { id: newHtId(), testType: '', price: '' }])}
+                    onPress={() =>
+                      setHtEntries((prev) => [
+                        ...prev,
+                        { id: newHtId(), testType: '', price: '', testTypeCustom: false },
+                      ])
+                    }
                     disabled={visitFormBusy}
                   >
                     <Ionicons name="add-circle-outline" size={18} color={theme.colors.primary} />
                     <Text style={styles.vsAddText}>Add test line</Text>
                   </TouchableOpacity>
-                  <Field label="Test done by" value={testDoneBy} onChangeText={setTestDoneBy} disabled={visitFormBusy} />
+                  <Text style={styles.fieldLabel}>Test done by</Text>
+                  <TouchableOpacity
+                    style={styles.vsPickerBtn}
+                    onPress={() => setSelectModal({ kind: 'staff_test' })}
+                    disabled={visitFormBusy}
+                  >
+                    <Text style={styles.vsPickerBtnText} numberOfLines={1}>
+                      {testDoneBy.trim() || 'Select staff (CRM list)'}
+                    </Text>
+                    <Ionicons name="chevron-down" size={18} color={theme.colors.primary} />
+                  </TouchableOpacity>
                   <VsMultiline
                     label="Test results"
                     value={testResults}
@@ -733,11 +880,34 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
 
             <View style={[styles.card, styles.visitCard]}>
               <View style={styles.visitRowBetween}>
-                <Text style={styles.vsSectionTitle}>Accessory</Text>
+                <TouchableOpacity
+                  style={styles.vsSectionHeaderTap}
+                  onPress={() => setVsOpen((o) => ({ ...o, acc: !o.acc }))}
+                  disabled={visitFormBusy}
+                  hitSlop={{ top: 8, bottom: 8 }}
+                >
+                  <Ionicons
+                    name={vsOpen.acc ? 'chevron-down' : 'chevron-forward'}
+                    size={18}
+                    color={theme.colors.textMuted}
+                  />
+                  <Text style={styles.vsSectionTitle}>Accessory</Text>
+                </TouchableOpacity>
                 <Switch value={accessory} onValueChange={setAccessory} disabled={visitFormBusy} />
               </View>
-              {accessory ? (
+              {accessory && vsOpen.acc ? (
                 <>
+                  <TouchableOpacity
+                    style={styles.vsCatalogLink}
+                    onPress={() => {
+                      setAccessoryCatalogSearch('');
+                      setAccessoryCatalogModal(true);
+                    }}
+                    disabled={visitFormBusy}
+                  >
+                    <Ionicons name="list-outline" size={18} color={theme.colors.primary} />
+                    <Text style={styles.vsCatalogLinkText}>Pick from catalog (Accessory / Battery / Charger)</Text>
+                  </TouchableOpacity>
                   <Field label="Accessory name *" value={accessoryName} onChangeText={setAccessoryName} disabled={visitFormBusy} />
                   <VsMultiline
                     label="Details"
@@ -769,10 +939,22 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
 
             <View style={[styles.card, styles.visitCard]}>
               <View style={styles.visitRowBetween}>
-                <Text style={styles.vsSectionTitle}>Programming</Text>
+                <TouchableOpacity
+                  style={styles.vsSectionHeaderTap}
+                  onPress={() => setVsOpen((o) => ({ ...o, prog: !o.prog }))}
+                  disabled={visitFormBusy}
+                  hitSlop={{ top: 8, bottom: 8 }}
+                >
+                  <Ionicons
+                    name={vsOpen.prog ? 'chevron-down' : 'chevron-forward'}
+                    size={18}
+                    color={theme.colors.textMuted}
+                  />
+                  <Text style={styles.vsSectionTitle}>Programming</Text>
+                </TouchableOpacity>
                 <Switch value={programming} onValueChange={setProgramming} disabled={visitFormBusy} />
               </View>
-              {programming ? (
+              {programming && vsOpen.prog ? (
                 <>
                   <VsMultiline
                     label="Reason"
@@ -787,7 +969,17 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
                     keyboardType="decimal-pad"
                     disabled={visitFormBusy}
                   />
-                  <Field label="Done by" value={programmingDoneBy} onChangeText={setProgrammingDoneBy} disabled={visitFormBusy} />
+                  <Text style={styles.fieldLabel}>Done by</Text>
+                  <TouchableOpacity
+                    style={styles.vsPickerBtn}
+                    onPress={() => setSelectModal({ kind: 'staff_prog' })}
+                    disabled={visitFormBusy}
+                  >
+                    <Text style={styles.vsPickerBtnText} numberOfLines={1}>
+                      {programmingDoneBy.trim() || 'Select staff (CRM list)'}
+                    </Text>
+                    <Ionicons name="chevron-down" size={18} color={theme.colors.primary} />
+                  </TouchableOpacity>
                   <Field
                     label="HA purchase date"
                     value={hearingAidPurchaseDate}
@@ -806,10 +998,22 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
 
             <View style={[styles.card, styles.visitCard]}>
               <View style={styles.visitRowBetween}>
-                <Text style={styles.vsSectionTitle}>Counselling</Text>
+                <TouchableOpacity
+                  style={styles.vsSectionHeaderTap}
+                  onPress={() => setVsOpen((o) => ({ ...o, cou: !o.cou }))}
+                  disabled={visitFormBusy}
+                  hitSlop={{ top: 8, bottom: 8 }}
+                >
+                  <Ionicons
+                    name={vsOpen.cou ? 'chevron-down' : 'chevron-forward'}
+                    size={18}
+                    color={theme.colors.textMuted}
+                  />
+                  <Text style={styles.vsSectionTitle}>Counselling</Text>
+                </TouchableOpacity>
                 <Switch value={counselling} onValueChange={setCounselling} disabled={visitFormBusy} />
               </View>
-              {counselling ? (
+              {counselling && vsOpen.cou ? (
                 <VsMultiline
                   label="Notes"
                   value={counsellingNotes}
@@ -830,7 +1034,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
                 <Text style={styles.visitSaveBtnText}>Save visit services</Text>
               )}
             </TouchableOpacity>
-          </>
+          </View>
         )}
 
         <Text style={[styles.blockTitle, { marginTop: 8 }]}>Payment & receipt</Text>
@@ -1126,6 +1330,160 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
               <Text style={styles.emptyInv}>{inventoryLoading ? 'Loading…' : 'No rows match.'}</Text>
             }
           />
+        </SafeAreaView>
+      </Modal>
+
+      <Modal visible={!!selectModal} animationType="slide" onRequestClose={() => setSelectModal(null)}>
+        <SafeAreaView style={styles.modalWrap}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setSelectModal(null)}>
+              <Text style={styles.modalClose}>Close</Text>
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>
+              {selectModal?.kind === 'ht'
+                ? 'Test type'
+                : selectModal?.kind === 'staff_test'
+                  ? 'Test done by'
+                  : 'Programming done by'}
+            </Text>
+            <View style={{ width: 48 }} />
+          </View>
+          <TextInput
+            style={styles.input}
+            placeholder={selectModal?.kind === 'ht' ? 'Search test types' : 'Search staff'}
+            placeholderTextColor={theme.colors.textMuted}
+            value={optionSearch}
+            onChangeText={setOptionSearch}
+          />
+          {selectModal?.kind === 'ht' ? (
+            <FlatList
+              data={filteredHtOptions}
+              keyExtractor={(item) => item.optionValue}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.invRow}
+                  onPress={() => {
+                    const rowId = selectModal.kind === 'ht' ? selectModal.rowId : '';
+                    const idx = htEntries.findIndex((x) => x.id === rowId);
+                    if (idx >= 0) {
+                      const next = [...htEntries];
+                      next[idx] = { ...next[idx], testType: item.optionValue, testTypeCustom: false };
+                      setHtEntries(next);
+                    }
+                    setSelectModal(null);
+                  }}
+                >
+                  <Text style={styles.invName}>{item.optionLabel}</Text>
+                  <Text style={styles.invSub}>{item.optionValue}</Text>
+                </TouchableOpacity>
+              )}
+              ListEmptyComponent={<Text style={styles.emptyInv}>No matching types. Try custom.</Text>}
+              ListFooterComponent={
+                <TouchableOpacity
+                  style={styles.invRow}
+                  onPress={() => {
+                    const rowId = selectModal?.kind === 'ht' ? selectModal.rowId : '';
+                    const idx = htEntries.findIndex((x) => x.id === rowId);
+                    if (idx >= 0) {
+                      const next = [...htEntries];
+                      next[idx] = { ...next[idx], testType: '', testTypeCustom: true };
+                      setHtEntries(next);
+                    }
+                    setSelectModal(null);
+                  }}
+                >
+                  <Text style={styles.invName}>Other / custom…</Text>
+                  <Text style={styles.invSub}>Enter text in the form</Text>
+                </TouchableOpacity>
+              }
+            />
+          ) : (
+            <>
+              <FlatList
+                data={filteredStaffModal}
+                keyExtractor={(item) => item}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={styles.invRow}
+                    onPress={() => {
+                      if (selectModal?.kind === 'staff_test') setTestDoneBy(item);
+                      if (selectModal?.kind === 'staff_prog') setProgrammingDoneBy(item);
+                      setSelectModal(null);
+                    }}
+                  >
+                    <Text style={styles.invName}>{item}</Text>
+                  </TouchableOpacity>
+                )}
+                ListEmptyComponent={<Text style={styles.emptyInv}>No matches.</Text>}
+              />
+              <Text style={styles.fieldLabel}>Name not listed</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Type full name"
+                placeholderTextColor={theme.colors.textMuted}
+                value={staffCustomDraft}
+                onChangeText={setStaffCustomDraft}
+              />
+              <TouchableOpacity
+                style={styles.vsModalUseBtn}
+                onPress={() => {
+                  const t = staffCustomDraft.trim();
+                  if (!t) return;
+                  if (selectModal?.kind === 'staff_test') setTestDoneBy(t);
+                  if (selectModal?.kind === 'staff_prog') setProgrammingDoneBy(t);
+                  setSelectModal(null);
+                }}
+              >
+                <Text style={styles.vsModalUseBtnText}>Use this name</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </SafeAreaView>
+      </Modal>
+
+      <Modal
+        visible={accessoryCatalogModal}
+        animationType="slide"
+        onRequestClose={() => setAccessoryCatalogModal(false)}
+      >
+        <SafeAreaView style={styles.modalWrap}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setAccessoryCatalogModal(false)}>
+              <Text style={styles.modalClose}>Close</Text>
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Accessory catalog</Text>
+            <View style={{ width: 48 }} />
+          </View>
+          <TextInput
+            style={styles.input}
+            placeholder="Search accessory, battery, charger"
+            placeholderTextColor={theme.colors.textMuted}
+            value={accessoryCatalogSearch}
+            onChangeText={setAccessoryCatalogSearch}
+          />
+          {accessoryCatalogLoading ? (
+            <ActivityIndicator style={{ marginTop: 16 }} color={theme.colors.primary} />
+          ) : (
+            <FlatList
+              data={accessoryCatalogItems}
+              keyExtractor={(it) => it.id}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.invRow}
+                  onPress={() => {
+                    setAccessoryName(item.name);
+                    setAccessoryCatalogModal(false);
+                  }}
+                >
+                  <Text style={styles.invName}>{item.name}</Text>
+                  <Text style={styles.invSub}>
+                    {item.company} · {item.type} · ₹{item.mrp ?? 0}
+                  </Text>
+                </TouchableOpacity>
+              )}
+              ListEmptyComponent={<Text style={styles.emptyInv}>No products. Try search.</Text>}
+            />
+          )}
         </SafeAreaView>
       </Modal>
     </SafeAreaView>
@@ -1431,5 +1789,77 @@ const styles = StyleSheet.create({
     color: theme.colors.primary,
     fontSize: 16,
     fontWeight: '700',
+  },
+  visitServicesShell: {
+    borderRadius: 14,
+    overflow: 'hidden',
+    marginBottom: 4,
+  },
+  vsSectionHeaderTap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+    minWidth: 0,
+  },
+  vsPickerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginBottom: 6,
+    backgroundColor: theme.colors.background,
+    minHeight: 48,
+  },
+  vsPickerBtnText: {
+    flex: 1,
+    fontSize: 16,
+    color: theme.colors.text,
+    fontWeight: '500',
+  },
+  vsToggleLink: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: theme.colors.primary,
+    marginBottom: 8,
+  },
+  vsCatalogLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+    paddingVertical: 4,
+  },
+  vsCatalogLinkText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.colors.primary,
+  },
+  htBlock: {
+    marginBottom: 4,
+  },
+  vsMinW: {
+    minWidth: 0,
+  },
+  vsInputNoMb: {
+    marginBottom: 6,
+  },
+  vsModalUseBtn: {
+    backgroundColor: theme.colors.primary,
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  vsModalUseBtnText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
