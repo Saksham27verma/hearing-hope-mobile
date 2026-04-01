@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
   TextInput,
   TouchableOpacity,
+  Pressable,
   StyleSheet,
   ScrollView,
   ActivityIndicator,
@@ -11,9 +12,20 @@ import {
   Modal,
   FlatList,
   Switch,
+  LayoutAnimation,
+  Platform,
+  UIManager,
+  Animated,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  ArrowLeft,
+  ChevronDown,
+  ChevronRight,
+  CirclePlus,
+  List,
+  Trash2,
+} from 'lucide-react-native';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import type { Appointment } from '../types';
@@ -95,6 +107,47 @@ type Props = {
   appointmentId: string;
   onBack: () => void;
 };
+
+const LUCIDE_STROKE = 2;
+
+/** Pill toggle with spring scale when selected (payment mode / receipt type). */
+function PaymentPill({
+  label,
+  selected,
+  onPress,
+  disabled,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+  disabled?: boolean;
+}) {
+  const scale = useRef(new Animated.Value(selected ? 1.06 : 1)).current;
+  useEffect(() => {
+    Animated.spring(scale, {
+      toValue: selected ? 1.06 : 1,
+      friction: 7,
+      tension: 180,
+      useNativeDriver: true,
+    }).start();
+  }, [selected, scale]);
+  return (
+    <Animated.View style={{ transform: [{ scale }] }}>
+      <Pressable
+        onPress={onPress}
+        disabled={disabled}
+        style={({ pressed }) => [
+          styles.pill,
+          selected ? styles.pillOn : styles.pillOff,
+          pressed && !disabled && styles.pillTap,
+          disabled && styles.pillDisabled,
+        ]}
+      >
+        <Text style={[styles.pillTxt, selected && styles.pillTxtOn]}>{label}</Text>
+      </Pressable>
+    </Animated.View>
+  );
+}
 
 export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
   const { appointments, isOnline } = useAppointmentsContext();
@@ -189,6 +242,19 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
   const [catalogSearch, setCatalogSearch] = useState('');
   const [catalogItems, setCatalogItems] = useState<CatalogProduct[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
+
+  const insets = useSafeAreaInsets();
+
+  useEffect(() => {
+    if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+      UIManager.setLayoutAnimationEnabledExperimental(true);
+    }
+  }, []);
+
+  const toggleVs = useCallback((key: 'ht' | 'acc' | 'prog' | 'cou') => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setVsOpen((o) => ({ ...o, [key]: !o[key] }));
+  }, []);
 
   const loadInventory = useCallback(async () => {
     setInventoryLoading(true);
@@ -708,9 +774,9 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-            <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
-          </TouchableOpacity>
+          <Pressable onPress={onBack} style={styles.backBtn} hitSlop={12}>
+            <ArrowLeft size={22} color={theme.colors.text} strokeWidth={LUCIDE_STROKE} />
+          </Pressable>
           <Text style={styles.headerTitle}>Visit details</Text>
           <View style={{ width: 40 }} />
         </View>
@@ -723,25 +789,37 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
     !!(resolved.enquiryId || '').trim() && isEligibleForVisitServicesLogging(resolved);
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.headerRow}>
-        <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-          <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Visit details</Text>
+        <Pressable onPress={onBack} style={styles.backBtn} hitSlop={12} accessibilityRole="button" accessibilityLabel="Back">
+          <ArrowLeft size={22} color={theme.colors.text} strokeWidth={LUCIDE_STROKE} />
+        </Pressable>
+        <View style={styles.headerTitleWrap}>
+          <Text style={styles.headerKicker}>Visit workspace</Text>
+          <Text style={styles.headerTitle}>Visit details</Text>
+        </View>
         <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        <View style={styles.card}>
-          <Text style={styles.sectionLabel}>Appointment</Text>
-          <Text style={styles.patientName}>{resolved.patientName || resolved.title || 'Patient'}</Text>
-          <Text style={styles.metaLine}>Enquiry ID: {resolved.enquiryId || '—'}</Text>
-          <Text style={styles.metaLine}>Type: {typeLabel}</Text>
-          <Text style={styles.metaLine}>Time: {formatTime(getStartIso(resolved))}</Text>
-        </View>
+      <View style={styles.mainFill}>
+        <ScrollView
+          contentContainerStyle={[
+            styles.scroll,
+            { paddingBottom: insets.bottom + (showVisitServicesForm ? 172 : 100) },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.appointmentHero}>
+            <Text style={styles.appointmentHeroKicker}>Appointment</Text>
+            <Text style={styles.appointmentPatient}>{resolved.patientName || resolved.title || 'Patient'}</Text>
+            <Text style={styles.appointmentMeta}>Enquiry ID · {resolved.enquiryId || '—'}</Text>
+            <Text style={styles.appointmentMeta}>
+              {typeLabel} · {formatTime(getStartIso(resolved))}
+            </Text>
+          </View>
 
-        <Text style={styles.blockTitle}>Visit services (CRM)</Text>
+          <Text style={styles.blockTitle}>Visit services (CRM)</Text>
         <Text style={styles.visitHint}>
           Use the same test types and staff names as the CRM enquiry form. Requires internet. Link an enquiry if missing.
         </Text>
@@ -753,19 +831,24 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
           <Text style={styles.visitMuted}>Visit services are not available for this appointment.</Text>
         ) : (
           <View style={styles.visitServicesShell}>
-            <View style={[styles.card, styles.visitCard]}>
+            <View
+              style={[
+                styles.visitServiceCard,
+                hearingTest && styles.visitServiceCardActive,
+              ]}
+            >
               <View style={styles.visitRowBetween}>
                 <TouchableOpacity
                   style={styles.vsSectionHeaderTap}
-                  onPress={() => setVsOpen((o) => ({ ...o, ht: !o.ht }))}
+                  onPress={() => toggleVs('ht')}
                   disabled={visitFormBusy}
                   hitSlop={{ top: 8, bottom: 8 }}
                 >
-                  <Ionicons
-                    name={vsOpen.ht ? 'chevron-down' : 'chevron-forward'}
-                    size={18}
-                    color={theme.colors.textMuted}
-                  />
+                  {vsOpen.ht ? (
+                    <ChevronDown size={20} color={theme.colors.textSecondary} strokeWidth={LUCIDE_STROKE} />
+                  ) : (
+                    <ChevronRight size={20} color={theme.colors.textSecondary} strokeWidth={LUCIDE_STROKE} />
+                  )}
                   <Text style={styles.vsSectionTitle}>Hearing test</Text>
                 </TouchableOpacity>
                 <Switch value={hearingTest} onValueChange={setHearingTest} disabled={visitFormBusy} />
@@ -778,7 +861,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
                         <View style={[styles.vsFlex, styles.vsMinW]}>
                           {row.testTypeCustom ? (
                             <TextInput
-                              style={[styles.input, styles.vsInputNoMb]}
+                              style={[styles.inputAiry, styles.vsInputNoMb]}
                               placeholder="Custom test type"
                               placeholderTextColor={theme.colors.textMuted}
                               value={row.testType}
@@ -798,7 +881,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
                               <Text style={styles.vsPickerBtnText} numberOfLines={2}>
                                 {resolveHtLabel(row)}
                               </Text>
-                              <Ionicons name="chevron-down" size={18} color={theme.colors.primary} />
+                              <ChevronDown size={20} color={theme.colors.primary} strokeWidth={LUCIDE_STROKE} />
                             </TouchableOpacity>
                           )}
                           <TouchableOpacity
@@ -817,7 +900,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
                           </TouchableOpacity>
                         </View>
                         <TextInput
-                          style={[styles.input, styles.vsPrice]}
+                          style={[styles.inputAiry, styles.vsPrice]}
                           placeholder="₹"
                           placeholderTextColor={theme.colors.textMuted}
                           keyboardType="decimal-pad"
@@ -833,7 +916,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
                           onPress={() => setHtEntries((prev) => prev.filter((r) => r.id !== row.id))}
                           disabled={htEntries.length <= 1 || visitFormBusy}
                         >
-                          <Ionicons name="trash-outline" size={22} color={theme.colors.error} />
+                          <Trash2 size={22} color={theme.colors.error} strokeWidth={LUCIDE_STROKE} />
                         </TouchableOpacity>
                       </View>
                     </View>
@@ -848,10 +931,10 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
                     }
                     disabled={visitFormBusy}
                   >
-                    <Ionicons name="add-circle-outline" size={18} color={theme.colors.primary} />
+                    <CirclePlus size={20} color={theme.colors.primary} strokeWidth={LUCIDE_STROKE} />
                     <Text style={styles.vsAddText}>Add test line</Text>
                   </TouchableOpacity>
-                  <Text style={styles.fieldLabel}>Test done by</Text>
+                  <Text style={styles.floatLabel}>Test done by</Text>
                   <TouchableOpacity
                     style={styles.vsPickerBtn}
                     onPress={() => setSelectModal({ kind: 'staff_test' })}
@@ -860,7 +943,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
                     <Text style={styles.vsPickerBtnText} numberOfLines={1}>
                       {testDoneBy.trim() || 'Select staff (CRM list)'}
                     </Text>
-                    <Ionicons name="chevron-down" size={18} color={theme.colors.primary} />
+                    <ChevronDown size={20} color={theme.colors.primary} strokeWidth={LUCIDE_STROKE} />
                   </TouchableOpacity>
                   <VsMultiline
                     label="Test results"
@@ -878,19 +961,19 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
               ) : null}
             </View>
 
-            <View style={[styles.card, styles.visitCard]}>
+            <View style={[styles.visitServiceCard, accessory && styles.visitServiceCardActive]}>
               <View style={styles.visitRowBetween}>
                 <TouchableOpacity
                   style={styles.vsSectionHeaderTap}
-                  onPress={() => setVsOpen((o) => ({ ...o, acc: !o.acc }))}
+                  onPress={() => toggleVs('acc')}
                   disabled={visitFormBusy}
                   hitSlop={{ top: 8, bottom: 8 }}
                 >
-                  <Ionicons
-                    name={vsOpen.acc ? 'chevron-down' : 'chevron-forward'}
-                    size={18}
-                    color={theme.colors.textMuted}
-                  />
+                  {vsOpen.acc ? (
+                    <ChevronDown size={20} color={theme.colors.textSecondary} strokeWidth={LUCIDE_STROKE} />
+                  ) : (
+                    <ChevronRight size={20} color={theme.colors.textSecondary} strokeWidth={LUCIDE_STROKE} />
+                  )}
                   <Text style={styles.vsSectionTitle}>Accessory</Text>
                 </TouchableOpacity>
                 <Switch value={accessory} onValueChange={setAccessory} disabled={visitFormBusy} />
@@ -905,7 +988,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
                     }}
                     disabled={visitFormBusy}
                   >
-                    <Ionicons name="list-outline" size={18} color={theme.colors.primary} />
+                    <List size={20} color={theme.colors.primary} strokeWidth={LUCIDE_STROKE} />
                     <Text style={styles.vsCatalogLinkText}>Pick from catalog (Accessory / Battery / Charger)</Text>
                   </TouchableOpacity>
                   <Field label="Accessory name *" value={accessoryName} onChangeText={setAccessoryName} disabled={visitFormBusy} />
@@ -937,19 +1020,19 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
               ) : null}
             </View>
 
-            <View style={[styles.card, styles.visitCard]}>
+            <View style={[styles.visitServiceCard, programming && styles.visitServiceCardActive]}>
               <View style={styles.visitRowBetween}>
                 <TouchableOpacity
                   style={styles.vsSectionHeaderTap}
-                  onPress={() => setVsOpen((o) => ({ ...o, prog: !o.prog }))}
+                  onPress={() => toggleVs('prog')}
                   disabled={visitFormBusy}
                   hitSlop={{ top: 8, bottom: 8 }}
                 >
-                  <Ionicons
-                    name={vsOpen.prog ? 'chevron-down' : 'chevron-forward'}
-                    size={18}
-                    color={theme.colors.textMuted}
-                  />
+                  {vsOpen.prog ? (
+                    <ChevronDown size={20} color={theme.colors.textSecondary} strokeWidth={LUCIDE_STROKE} />
+                  ) : (
+                    <ChevronRight size={20} color={theme.colors.textSecondary} strokeWidth={LUCIDE_STROKE} />
+                  )}
                   <Text style={styles.vsSectionTitle}>Programming</Text>
                 </TouchableOpacity>
                 <Switch value={programming} onValueChange={setProgramming} disabled={visitFormBusy} />
@@ -969,7 +1052,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
                     keyboardType="decimal-pad"
                     disabled={visitFormBusy}
                   />
-                  <Text style={styles.fieldLabel}>Done by</Text>
+                  <Text style={styles.floatLabel}>Done by</Text>
                   <TouchableOpacity
                     style={styles.vsPickerBtn}
                     onPress={() => setSelectModal({ kind: 'staff_prog' })}
@@ -978,7 +1061,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
                     <Text style={styles.vsPickerBtnText} numberOfLines={1}>
                       {programmingDoneBy.trim() || 'Select staff (CRM list)'}
                     </Text>
-                    <Ionicons name="chevron-down" size={18} color={theme.colors.primary} />
+                    <ChevronDown size={20} color={theme.colors.primary} strokeWidth={LUCIDE_STROKE} />
                   </TouchableOpacity>
                   <Field
                     label="HA purchase date"
@@ -996,19 +1079,19 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
               ) : null}
             </View>
 
-            <View style={[styles.card, styles.visitCard]}>
+            <View style={[styles.visitServiceCard, counselling && styles.visitServiceCardActive]}>
               <View style={styles.visitRowBetween}>
                 <TouchableOpacity
                   style={styles.vsSectionHeaderTap}
-                  onPress={() => setVsOpen((o) => ({ ...o, cou: !o.cou }))}
+                  onPress={() => toggleVs('cou')}
                   disabled={visitFormBusy}
                   hitSlop={{ top: 8, bottom: 8 }}
                 >
-                  <Ionicons
-                    name={vsOpen.cou ? 'chevron-down' : 'chevron-forward'}
-                    size={18}
-                    color={theme.colors.textMuted}
-                  />
+                  {vsOpen.cou ? (
+                    <ChevronDown size={20} color={theme.colors.textSecondary} strokeWidth={LUCIDE_STROKE} />
+                  ) : (
+                    <ChevronRight size={20} color={theme.colors.textSecondary} strokeWidth={LUCIDE_STROKE} />
+                  )}
                   <Text style={styles.vsSectionTitle}>Counselling</Text>
                 </TouchableOpacity>
                 <Switch value={counselling} onValueChange={setCounselling} disabled={visitFormBusy} />
@@ -1023,63 +1106,56 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
               ) : null}
             </View>
 
-            <TouchableOpacity
-              style={[styles.visitSaveBtn, (visitFormBusy || savingVisitServices) && styles.submitBtnDisabled]}
-              onPress={() => void handleSaveVisitServices()}
-              disabled={visitFormBusy || savingVisitServices}
-            >
-              {savingVisitServices ? (
-                <ActivityIndicator color={theme.colors.primary} />
-              ) : (
-                <Text style={styles.visitSaveBtnText}>Save visit services</Text>
-              )}
-            </TouchableOpacity>
           </View>
         )}
 
-        <Text style={[styles.blockTitle, { marginTop: 8 }]}>Payment & receipt</Text>
+        <View style={styles.sectionSpacer} />
+        <Text style={styles.blockTitle}>Payment & receipt</Text>
         <Text style={styles.visitHint}>Collect payment for trial, booking, or sale — sent to admin for verification.</Text>
 
-        <Text style={styles.fieldLabel}>Payment collected today (₹)</Text>
-        <TextInput
-          style={styles.input}
-          keyboardType="decimal-pad"
-          placeholder="0"
-          placeholderTextColor={theme.colors.textMuted}
-          value={amount}
-          onChangeText={setAmount}
-          editable={!visitFormBusy}
-        />
+        <View style={styles.amountHero}>
+          <Text style={styles.amountHeroLabel}>Payment collected today</Text>
+          <View style={styles.amountHeroInner}>
+            <Text style={styles.amountRupee}>₹</Text>
+            <TextInput
+              style={styles.amountHeroInput}
+              keyboardType="decimal-pad"
+              placeholder="0"
+              placeholderTextColor={theme.colors.textMuted}
+              value={amount}
+              onChangeText={setAmount}
+              editable={!visitFormBusy}
+            />
+          </View>
+        </View>
 
-        <Text style={styles.fieldLabel}>Payment mode</Text>
-        <View style={styles.chipRow}>
+        <Text style={styles.subfieldLabel}>Payment mode</Text>
+        <View style={styles.pillRow}>
           {(['cash', 'upi', 'card'] as const).map((m) => (
-            <TouchableOpacity
+            <PaymentPill
               key={m}
-              style={[styles.chip, paymentMode === m && styles.chipActive]}
+              label={m.toUpperCase()}
+              selected={paymentMode === m}
               onPress={() => setPaymentMode(m)}
               disabled={visitFormBusy}
-            >
-              <Text style={[styles.chipText, paymentMode === m && styles.chipTextActive]}>{m.toUpperCase()}</Text>
-            </TouchableOpacity>
+            />
           ))}
         </View>
 
-        <Text style={styles.fieldLabel}>Receipt type</Text>
-        <View style={styles.chipRow}>
+        <Text style={styles.subfieldLabel}>Receipt type</Text>
+        <View style={styles.pillRow}>
           {(['trial', 'booking', 'invoice'] as const).map((t) => (
-            <TouchableOpacity
+            <PaymentPill
               key={t}
-              style={[styles.chip, receiptType === t && styles.chipActive]}
+              label={t.charAt(0).toUpperCase() + t.slice(1)}
+              selected={receiptType === t}
               onPress={() => setReceiptType(t)}
               disabled={visitFormBusy}
-            >
-              <Text style={[styles.chipText, receiptType === t && styles.chipTextActive]}>{t}</Text>
-            </TouchableOpacity>
+            />
           ))}
         </View>
 
-        <View style={styles.card}>
+        <View style={styles.softCard}>
           <Text style={styles.sectionLabel}>PDF template (CRM)</Text>
           {currentPdfTemplate ? (
             <>
@@ -1235,18 +1311,56 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
           </View>
         ) : null}
 
-        <TouchableOpacity
-          style={[styles.submitBtn, visitFormBusy && styles.submitBtnDisabled]}
-          onPress={() => void handleSubmit()}
-          disabled={visitFormBusy}
+        </ScrollView>
+
+        <View
+          style={[
+            styles.stickyFooter,
+            { paddingBottom: Math.max(insets.bottom, 14), paddingTop: 12 },
+          ]}
         >
-          {submitting ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.submitText}>Send payment to admin</Text>
-          )}
-        </TouchableOpacity>
-      </ScrollView>
+          <View style={styles.stickyFooterInner}>
+            {showVisitServicesForm ? (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.ctaPrimarySolid,
+                  (visitFormBusy || savingVisitServices) && styles.ctaMuted,
+                  pressed && !(visitFormBusy || savingVisitServices) && styles.ctaPrimaryPressed,
+                ]}
+                onPress={() => void handleSaveVisitServices()}
+                disabled={visitFormBusy || savingVisitServices}
+              >
+                {savingVisitServices ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.ctaPrimarySolidText}>Save visit services</Text>
+                )}
+              </Pressable>
+            ) : null}
+            <Pressable
+              style={({ pressed }) => [
+                showVisitServicesForm ? styles.ctaTealSolid : styles.ctaPrimarySolid,
+                visitFormBusy && styles.ctaMuted,
+                pressed && !visitFormBusy && styles.ctaPrimaryPressed,
+              ]}
+              onPress={() => void handleSubmit()}
+              disabled={visitFormBusy}
+            >
+              {submitting ? (
+                <ActivityIndicator color={showVisitServicesForm ? '#fff' : '#fff'} />
+              ) : (
+                <Text
+                  style={
+                    showVisitServicesForm ? styles.ctaTealSolidText : styles.ctaPrimarySolidText
+                  }
+                >
+                  Send payment to admin
+                </Text>
+              )}
+            </Pressable>
+          </View>
+        </View>
+      </View>
 
       <Modal visible={catalogModal} animationType="slide" onRequestClose={() => setCatalogModal(false)}>
         <SafeAreaView style={styles.modalWrap}>
@@ -1503,18 +1617,25 @@ function Field({
   keyboardType?: 'default' | 'decimal-pad' | 'number-pad';
   disabled?: boolean;
 }) {
+  const [focused, setFocused] = useState(false);
   return (
-    <>
-      <Text style={styles.fieldLabel}>{label}</Text>
+    <View style={styles.fieldWrap}>
+      <Text style={styles.floatLabel}>{label}</Text>
       <TextInput
-        style={styles.input}
+        style={[
+          styles.inputAiry,
+          focused && styles.inputAiryFocused,
+          disabled && styles.inputDisabled,
+        ]}
         value={value}
         onChangeText={onChangeText}
         keyboardType={keyboardType}
         placeholderTextColor={theme.colors.textMuted}
         editable={!disabled}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
       />
-    </>
+    </View>
   );
 }
 
@@ -1529,25 +1650,39 @@ function VsMultiline({
   onChangeText: (t: string) => void;
   disabled?: boolean;
 }) {
+  const [focused, setFocused] = useState(false);
   return (
-    <>
-      <Text style={styles.fieldLabel}>{label}</Text>
+    <View style={styles.fieldWrap}>
+      <Text style={styles.floatLabel}>{label}</Text>
       <TextInput
-        style={[styles.input, styles.textArea]}
+        style={[
+          styles.inputAiry,
+          styles.textAreaAiry,
+          focused && styles.inputAiryFocused,
+          disabled && styles.inputDisabled,
+        ]}
         value={value}
         onChangeText={onChangeText}
         placeholderTextColor={theme.colors.textMuted}
         multiline
         editable={!disabled}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
       />
-    </>
+    </View>
   );
 }
+
+const BORDER_SOFT = '#D8E0F0';
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: theme.colors.backgroundSecondary,
+    backgroundColor: '#F1F5F9',
+  },
+  mainFill: {
+    flex: 1,
+    position: 'relative',
   },
   centered: {
     flex: 1,
@@ -1558,70 +1693,261 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     backgroundColor: theme.colors.background,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: theme.colors.border,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER_SOFT,
   },
   backBtn: {
     padding: 8,
-    width: 40,
+    width: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 12,
+  },
+  headerTitleWrap: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  headerKicker: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: theme.colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 2,
   },
   headerTitle: {
     fontSize: 17,
-    fontWeight: '600',
+    fontWeight: '700',
     color: theme.colors.text,
+    letterSpacing: -0.3,
   },
   scroll: {
+    paddingHorizontal: 20,
+    paddingTop: 24,
+  },
+  appointmentHero: {
+    backgroundColor: '#E8F4FA',
+    borderRadius: 20,
     padding: 20,
-    paddingBottom: 40,
+    marginBottom: 28,
+    borderWidth: 1,
+    borderColor: 'rgba(13, 148, 136, 0.22)',
+    ...theme.shadows.soft,
+  },
+  appointmentHeroKicker: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: theme.colors.tealDark,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 8,
+  },
+  appointmentPatient: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: theme.colors.text,
+    marginBottom: 10,
+    lineHeight: 28,
+    letterSpacing: -0.4,
+  },
+  appointmentMeta: {
+    fontSize: 14,
+    color: theme.colors.textSecondary,
+    marginTop: 4,
+    lineHeight: 22,
+  },
+  sectionSpacer: {
+    height: 8,
   },
   card: {
     backgroundColor: theme.colors.background,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
+    borderRadius: 20,
+    padding: 18,
+    marginBottom: 22,
+    borderWidth: 1,
+    borderColor: BORDER_SOFT,
+    ...theme.shadows.soft,
+  },
+  softCard: {
+    backgroundColor: theme.colors.background,
+    borderRadius: 20,
+    padding: 18,
+    marginBottom: 22,
+    borderWidth: 1,
+    borderColor: BORDER_SOFT,
     ...theme.shadows.soft,
   },
   sectionLabel: {
-    fontSize: 12,
+    fontSize: 11,
     color: theme.colors.textMuted,
     textTransform: 'uppercase',
-    marginBottom: 8,
-    fontWeight: '600',
+    marginBottom: 10,
+    fontWeight: '700',
+    letterSpacing: 0.6,
   },
   patientName: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
     color: theme.colors.text,
     marginBottom: 8,
+    lineHeight: 24,
   },
   metaLine: {
     fontSize: 14,
     color: theme.colors.textSecondary,
-    marginTop: 4,
+    marginTop: 6,
+    lineHeight: 22,
   },
   fieldLabel: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     color: theme.colors.text,
     marginBottom: 8,
+    lineHeight: 20,
+  },
+  floatLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: theme.colors.textSecondary,
+    marginBottom: 8,
+    lineHeight: 20,
+  },
+  subfieldLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: theme.colors.textMuted,
+    marginBottom: 10,
+    marginTop: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  fieldWrap: {
+    marginBottom: 18,
+  },
+  inputAiry: {
+    borderWidth: 1,
+    borderColor: BORDER_SOFT,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    fontSize: 16,
+    color: theme.colors.text,
+    backgroundColor: theme.colors.background,
+    lineHeight: 22,
+  },
+  inputAiryFocused: {
+    borderColor: theme.colors.primary,
+    borderWidth: 1.5,
+    shadowColor: theme.colors.primary,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+  },
+  inputDisabled: {
+    opacity: 0.55,
+    backgroundColor: theme.colors.backgroundTertiary,
+  },
+  textAreaAiry: {
+    minHeight: 100,
+    textAlignVertical: 'top',
+    paddingTop: 14,
   },
   input: {
     borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    borderColor: BORDER_SOFT,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     fontSize: 16,
     color: theme.colors.text,
     marginBottom: 16,
     backgroundColor: theme.colors.background,
   },
   textArea: {
-    minHeight: 80,
+    minHeight: 88,
     textAlignVertical: 'top',
+  },
+  amountHero: {
+    backgroundColor: theme.colors.background,
+    borderRadius: 20,
+    padding: 18,
+    marginBottom: 22,
+    borderWidth: 1,
+    borderColor: BORDER_SOFT,
+    ...theme.shadows.soft,
+  },
+  amountHeroLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: theme.colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: 10,
+  },
+  amountHeroInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  amountRupee: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: theme.colors.text,
+    marginRight: 6,
+    lineHeight: 34,
+  },
+  amountHeroInput: {
+    flex: 1,
+    fontSize: 32,
+    fontWeight: '700',
+    color: theme.colors.text,
+    paddingVertical: 4,
+    letterSpacing: -0.5,
+  },
+  pillRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 22,
+  },
+  pill: {
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 999,
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pillOff: {
+    backgroundColor: theme.colors.background,
+    borderWidth: 1,
+    borderColor: BORDER_SOFT,
+  },
+  pillOn: {
+    backgroundColor: theme.colors.primary,
+    borderWidth: 0,
+    shadowColor: theme.colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  pillTap: {
+    opacity: 0.92,
+  },
+  pillDisabled: {
+    opacity: 0.5,
+  },
+  pillTxt: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.colors.text,
+    letterSpacing: 0.2,
+  },
+  pillTxtOn: {
+    color: '#FFFFFF',
   },
   chipRow: {
     flexDirection: 'row',
@@ -1632,9 +1958,9 @@ const styles = StyleSheet.create({
   chip: {
     paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 20,
+    borderRadius: 999,
     borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderColor: BORDER_SOFT,
     backgroundColor: theme.colors.background,
   },
   chipActive: {
@@ -1648,43 +1974,88 @@ const styles = StyleSheet.create({
   },
   chipTextActive: {
     color: theme.colors.primary,
+    fontWeight: '600',
   },
   block: {
-    marginBottom: 8,
+    marginBottom: 14,
   },
   blockTitle: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '700',
     color: theme.colors.text,
-    marginBottom: 12,
+    marginBottom: 14,
+    marginTop: 4,
+    letterSpacing: -0.3,
+    lineHeight: 24,
   },
   pickBtn: {
     borderWidth: 1,
     borderColor: theme.colors.primary,
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 12,
-    backgroundColor: theme.colors.background,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 14,
+    backgroundColor: theme.colors.primaryLight,
   },
   pickBtnText: {
-    color: theme.colors.primary,
+    color: theme.colors.primaryDark,
     fontWeight: '600',
     fontSize: 15,
-  },
-  submitBtn: {
-    backgroundColor: theme.colors.primary,
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginTop: 8,
+    lineHeight: 22,
   },
   submitBtnDisabled: {
     opacity: 0.7,
   },
-  submitText: {
-    color: '#fff',
+  stickyFooter: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    borderTopWidth: 1,
+    borderTopColor: BORDER_SOFT,
+    paddingHorizontal: 16,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 16,
+  },
+  stickyFooterInner: {
+    gap: 10,
+  },
+  ctaPrimarySolid: {
+    backgroundColor: theme.colors.primary,
+    borderRadius: 16,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 52,
+  },
+  ctaPrimarySolidText: {
+    color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  ctaTealSolid: {
+    backgroundColor: theme.colors.tealDark,
+    borderRadius: 16,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 52,
+  },
+  ctaTealSolidText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  ctaMuted: {
+    opacity: 0.55,
+  },
+  ctaPrimaryPressed: {
+    opacity: 0.88,
+    transform: [{ scale: 0.98 }],
   },
   modalWrap: {
     flex: 1,
@@ -1707,7 +2078,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   invRow: {
-    paddingVertical: 12,
+    paddingVertical: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: theme.colors.border,
   },
@@ -1715,31 +2086,48 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: theme.colors.text,
+    lineHeight: 22,
   },
   invSub: {
     fontSize: 13,
     color: theme.colors.textSecondary,
     marginTop: 4,
+    lineHeight: 19,
   },
   emptyInv: {
     textAlign: 'center',
     marginTop: 24,
     color: theme.colors.textMuted,
+    lineHeight: 22,
   },
   visitHint: {
-    fontSize: 13,
+    fontSize: 14,
     color: theme.colors.textSecondary,
-    lineHeight: 20,
-    marginBottom: 12,
+    lineHeight: 22,
+    marginBottom: 18,
   },
   visitMuted: {
     fontSize: 14,
     color: theme.colors.textMuted,
-    marginBottom: 16,
+    marginBottom: 18,
     lineHeight: 22,
   },
-  visitCard: {
-    marginBottom: 12,
+  visitServicesShell: {
+    gap: 14,
+    marginBottom: 8,
+  },
+  visitServiceCard: {
+    backgroundColor: theme.colors.background,
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 0,
+    borderWidth: 1,
+    borderColor: BORDER_SOFT,
+    ...theme.shadows.soft,
+  },
+  visitServiceCardActive: {
+    borderColor: 'rgba(79, 70, 229, 0.45)',
+    backgroundColor: '#FAFBFF',
   },
   visitRowBetween: {
     flexDirection: 'row',
@@ -1751,6 +2139,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: theme.colors.text,
+    letterSpacing: -0.2,
   },
   htRow: {
     flexDirection: 'row',
@@ -1762,43 +2151,25 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   vsPrice: {
-    width: 88,
+    width: 92,
     marginBottom: 0,
   },
   vsAddRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginBottom: 12,
+    gap: 8,
+    marginBottom: 14,
+    marginTop: 4,
   },
   vsAddText: {
     color: theme.colors.primary,
     fontWeight: '600',
-    fontSize: 14,
-  },
-  visitSaveBtn: {
-    borderWidth: 2,
-    borderColor: theme.colors.primary,
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginBottom: 20,
-    backgroundColor: theme.colors.background,
-  },
-  visitSaveBtnText: {
-    color: theme.colors.primary,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  visitServicesShell: {
-    borderRadius: 14,
-    overflow: 'hidden',
-    marginBottom: 4,
+    fontSize: 15,
   },
   vsSectionHeaderTap: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
     flex: 1,
     minWidth: 0,
   },
@@ -1808,19 +2179,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 8,
     borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    marginBottom: 6,
+    borderColor: BORDER_SOFT,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 8,
     backgroundColor: theme.colors.background,
-    minHeight: 48,
+    minHeight: 52,
   },
   vsPickerBtnText: {
     flex: 1,
     fontSize: 16,
     color: theme.colors.text,
     fontWeight: '500',
+    lineHeight: 22,
   },
   vsToggleLink: {
     fontSize: 13,
@@ -1831,29 +2203,30 @@ const styles = StyleSheet.create({
   vsCatalogLink: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 12,
-    paddingVertical: 4,
+    gap: 10,
+    marginBottom: 14,
+    paddingVertical: 8,
   },
   vsCatalogLinkText: {
     flex: 1,
     fontSize: 14,
     fontWeight: '600',
     color: theme.colors.primary,
+    lineHeight: 20,
   },
   htBlock: {
-    marginBottom: 4,
+    marginBottom: 8,
   },
   vsMinW: {
     minWidth: 0,
   },
   vsInputNoMb: {
-    marginBottom: 6,
+    marginBottom: 8,
   },
   vsModalUseBtn: {
     backgroundColor: theme.colors.primary,
-    borderRadius: 10,
-    paddingVertical: 14,
+    borderRadius: 14,
+    paddingVertical: 16,
     alignItems: 'center',
     marginBottom: 12,
   },
