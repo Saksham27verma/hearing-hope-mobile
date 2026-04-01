@@ -18,13 +18,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAppointmentsContext } from '../context/AppointmentsContext';
 import type { Appointment } from '../types';
 import { theme } from '../theme';
-import { isPayableAppointmentForPayment } from '../utils/appointmentPayable';
+import { isPayableAppointmentForPayment, isEligibleForVisitServicesLogging } from '../utils/appointmentPayable';
 
 type TabFilter = 'all' | 'today' | 'upcoming' | 'completed' | 'cancelled';
 
 interface AppointmentsScreenProps {
   onAppointmentPress: (appointment: Appointment) => void;
   onLogPayment?: (appointment: Appointment) => void;
+  onLogVisitServices?: (appointment: Appointment) => void;
   onLogout: () => void;
 }
 
@@ -115,7 +116,12 @@ function groupByDate(appointments: Appointment[]): GroupedSection[] {
   });
 }
 
-export default function AppointmentsScreen({ onAppointmentPress, onLogPayment, onLogout }: AppointmentsScreenProps) {
+export default function AppointmentsScreen({
+  onAppointmentPress,
+  onLogPayment,
+  onLogVisitServices,
+  onLogout,
+}: AppointmentsScreenProps) {
   const { appointments, loading, error, isOnline, refresh } = useAppointmentsContext();
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<TabFilter>('today');
@@ -197,6 +203,8 @@ export default function AppointmentsScreen({ onAppointmentPress, onLogPayment, o
     const centerLabel = item.centerName || item.centerId || 'Center';
     const showLogPayment =
       activeTab === 'today' && Boolean(onLogPayment) && isPayableAppointmentForPayment(item);
+    const showLogVisitServices =
+      activeTab === 'today' && Boolean(onLogVisitServices) && isEligibleForVisitServicesLogging(item);
     return (
       <TouchableOpacity
         style={styles.card}
@@ -257,17 +265,33 @@ export default function AppointmentsScreen({ onAppointmentPress, onLogPayment, o
               <Ionicons name="navigate" size={18} color={item.address ? theme.colors.primary : theme.colors.textMuted} />
             </TouchableOpacity>
           )}
-          {showLogPayment ? (
-            <TouchableOpacity
-              style={styles.logPaymentBtn}
-              onPress={(e) => {
-                e?.stopPropagation?.();
-                onLogPayment?.(item);
-              }}
-            >
-              <Ionicons name="cash-outline" size={16} color="#fff" />
-              <Text style={styles.logPaymentBtnText}>Log payment</Text>
-            </TouchableOpacity>
+          {(showLogPayment || showLogVisitServices) ? (
+            <View style={styles.logActionsRow}>
+              {showLogVisitServices ? (
+                <TouchableOpacity
+                  style={[styles.logServicesBtn, !showLogPayment && styles.logServicesBtnSolo]}
+                  onPress={(e) => {
+                    e?.stopPropagation?.();
+                    onLogVisitServices?.(item);
+                  }}
+                >
+                  <Ionicons name="medical-outline" size={16} color={theme.colors.primary} />
+                  <Text style={styles.logServicesBtnText}>Services</Text>
+                </TouchableOpacity>
+              ) : null}
+              {showLogPayment ? (
+                <TouchableOpacity
+                  style={[styles.logPaymentBtn, !showLogVisitServices && styles.logPaymentBtnSolo]}
+                  onPress={(e) => {
+                    e?.stopPropagation?.();
+                    onLogPayment?.(item);
+                  }}
+                >
+                  <Ionicons name="cash-outline" size={16} color="#fff" />
+                  <Text style={styles.logPaymentBtnText}>Log payment</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
           ) : null}
         </View>
       </TouchableOpacity>
@@ -619,6 +643,35 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  logActionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginLeft: 'auto',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    flex: 1,
+    minWidth: 0,
+  },
+  logServicesBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    height: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.colors.primary,
+    backgroundColor: theme.colors.background,
+  },
+  logServicesBtnText: {
+    color: theme.colors.primary,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  logServicesBtnSolo: {
+    marginLeft: 'auto',
+  },
   logPaymentBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -627,6 +680,8 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 12,
     backgroundColor: theme.colors.primary,
+  },
+  logPaymentBtnSolo: {
     marginLeft: 'auto',
   },
   logPaymentBtnText: {

@@ -29,3 +29,8 @@ export function isPayableAppointmentForPayment(a: Appointment): boolean {
   if (s && s !== 'scheduled') return false;
   return true;
 }
+
+/** Same day/rules as payment + linked enquiry (required to write CRM visits). Network required (no offline queue). */
+export function isEligibleForVisitServicesLogging(a: Appointment): boolean {
+  return isPayableAppointmentForPayment(a) && Boolean((a.enquiryId || '').trim());
+}

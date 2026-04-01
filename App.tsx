@@ -11,12 +11,14 @@ import LoginScreen from './src/screens/LoginScreen';
 import AppointmentsScreen from './src/screens/AppointmentsScreen';
 import AppointmentDetailScreen from './src/screens/AppointmentDetailScreen';
 import ReceiptActionScreen from './src/screens/ReceiptActionScreen';
+import VisitServicesScreen from './src/screens/VisitServicesScreen';
 import type { Appointment } from './src/types';
 
 export type RootStackParamList = {
   Appointments: undefined;
   AppointmentDetail: { appointment: Appointment };
   ReceiptAction: { appointmentId: string };
+  VisitServices: { appointmentId: string };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -94,6 +96,9 @@ export default function App() {
                   onLogPayment={(apt) =>
                     props.navigation.navigate('ReceiptAction', { appointmentId: apt.id })
                   }
+                  onLogVisitServices={(apt) =>
+                    props.navigation.navigate('VisitServices', { appointmentId: apt.id })
+                  }
                   onLogout={handleLogout}
                 />
               )}
@@ -103,12 +108,23 @@ export default function App() {
                 <AppointmentDetailScreen
                   appointment={route.params.appointment}
                   onBack={() => navigation.goBack()}
+                  onLogVisitServices={() =>
+                    navigation.navigate('VisitServices', { appointmentId: route.params.appointment.id })
+                  }
                 />
               )}
             </Stack.Screen>
             <Stack.Screen name="ReceiptAction">
               {({ navigation, route }) => (
                 <ReceiptActionScreen
+                  appointmentId={route.params.appointmentId}
+                  onBack={() => navigation.goBack()}
+                />
+              )}
+            </Stack.Screen>
+            <Stack.Screen name="VisitServices">
+              {({ navigation, route }) => (
+                <VisitServicesScreen
                   appointmentId={route.params.appointmentId}
                   onBack={() => navigation.goBack()}
                 />

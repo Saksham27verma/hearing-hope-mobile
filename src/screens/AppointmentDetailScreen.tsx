@@ -18,10 +18,13 @@ import { db } from '../firebase';
 import type { Appointment } from '../types';
 import { theme } from '../theme';
 import { useAppointmentsContext } from '../context/AppointmentsContext';
+import { isEligibleForVisitServicesLogging } from '../utils/appointmentPayable';
 
 interface AppointmentDetailScreenProps {
   appointment: Appointment;
   onBack: () => void;
+  /** Navigate to staff visit-services flow (CRM enquiry visit; requires linked enquiry). */
+  onLogVisitServices?: () => void;
 }
 
 function formatDate(iso: string) {
@@ -48,6 +51,7 @@ function getStatusConfig(status?: string) {
 export default function AppointmentDetailScreen({
   appointment,
   onBack,
+  onLogVisitServices,
 }: AppointmentDetailScreenProps) {
   const { isOnline, updateAppointmentOptimistic, markCompletedOffline, markCancelledOffline } = useAppointmentsContext();
   const [feedback, setFeedback] = useState('');
@@ -57,6 +61,7 @@ export default function AppointmentDetailScreen({
 
   const isScheduled = appointment.status === 'scheduled' || !appointment.status;
   const statusConfig = getStatusConfig(appointment.status);
+  const showVisitServices = Boolean(onLogVisitServices) && isEligibleForVisitServicesLogging(appointment);
 
   useEffect(() => {
     const resolved = appointment.centerName;
@@ -276,6 +281,17 @@ export default function AppointmentDetailScreen({
 
         {isScheduled && (
           <View style={styles.actions}>
+            {showVisitServices ? (
+              <TouchableOpacity
+                style={[styles.actionButton, styles.servicesOutlineButton]}
+                onPress={onLogVisitServices}
+                disabled={saving}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="medical-outline" size={20} color={theme.colors.primary} />
+                <Text style={styles.servicesOutlineButtonText}>Log visit services</Text>
+              </TouchableOpacity>
+            ) : null}
             <TouchableOpacity
               style={[styles.actionButton, styles.completeButton]}
               onPress={handleMarkCompleted}
@@ -523,6 +539,16 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.backgroundTertiary,
     borderWidth: 1,
     borderColor: theme.colors.border,
+  },
+  servicesOutlineButton: {
+    backgroundColor: theme.colors.background,
+    borderWidth: 2,
+    borderColor: theme.colors.primary,
+  },
+  servicesOutlineButtonText: {
+    color: theme.colors.primary,
+    fontSize: 16,
+    fontWeight: '600',
   },
   actionButtonText: {
     color: '#fff',
