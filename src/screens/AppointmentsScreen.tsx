@@ -18,14 +18,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAppointmentsContext } from '../context/AppointmentsContext';
 import type { Appointment } from '../types';
 import { theme } from '../theme';
-import { isPayableAppointmentForPayment, isEligibleForVisitServicesLogging } from '../utils/appointmentPayable';
+import { isPayableAppointmentForPayment } from '../utils/appointmentPayable';
 
 type TabFilter = 'all' | 'today' | 'upcoming' | 'completed' | 'cancelled';
 
 interface AppointmentsScreenProps {
   onAppointmentPress: (appointment: Appointment) => void;
-  onLogPayment?: (appointment: Appointment) => void;
-  onLogVisitServices?: (appointment: Appointment) => void;
+  /** Opens visit details: services + payment/receipt in one place */
+  onVisitDetails?: (appointment: Appointment) => void;
   onLogout: () => void;
 }
 
@@ -116,12 +116,7 @@ function groupByDate(appointments: Appointment[]): GroupedSection[] {
   });
 }
 
-export default function AppointmentsScreen({
-  onAppointmentPress,
-  onLogPayment,
-  onLogVisitServices,
-  onLogout,
-}: AppointmentsScreenProps) {
+export default function AppointmentsScreen({ onAppointmentPress, onVisitDetails, onLogout }: AppointmentsScreenProps) {
   const { appointments, loading, error, isOnline, refresh } = useAppointmentsContext();
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<TabFilter>('today');
@@ -201,10 +196,8 @@ export default function AppointmentsScreen({
     const statusConfig = getStatusConfig(item.status);
     const isHomeVisit = item.type === 'home';
     const centerLabel = item.centerName || item.centerId || 'Center';
-    const showLogPayment =
-      activeTab === 'today' && Boolean(onLogPayment) && isPayableAppointmentForPayment(item);
-    const showLogVisitServices =
-      activeTab === 'today' && Boolean(onLogVisitServices) && isEligibleForVisitServicesLogging(item);
+    const showVisitDetails =
+      activeTab === 'today' && Boolean(onVisitDetails) && isPayableAppointmentForPayment(item);
     return (
       <TouchableOpacity
         style={styles.card}
@@ -265,33 +258,17 @@ export default function AppointmentsScreen({
               <Ionicons name="navigate" size={18} color={item.address ? theme.colors.primary : theme.colors.textMuted} />
             </TouchableOpacity>
           )}
-          {(showLogPayment || showLogVisitServices) ? (
-            <View style={styles.logActionsRow}>
-              {showLogVisitServices ? (
-                <TouchableOpacity
-                  style={[styles.logServicesBtn, !showLogPayment && styles.logServicesBtnSolo]}
-                  onPress={(e) => {
-                    e?.stopPropagation?.();
-                    onLogVisitServices?.(item);
-                  }}
-                >
-                  <Ionicons name="medical-outline" size={16} color={theme.colors.primary} />
-                  <Text style={styles.logServicesBtnText}>Services</Text>
-                </TouchableOpacity>
-              ) : null}
-              {showLogPayment ? (
-                <TouchableOpacity
-                  style={[styles.logPaymentBtn, !showLogVisitServices && styles.logPaymentBtnSolo]}
-                  onPress={(e) => {
-                    e?.stopPropagation?.();
-                    onLogPayment?.(item);
-                  }}
-                >
-                  <Ionicons name="cash-outline" size={16} color="#fff" />
-                  <Text style={styles.logPaymentBtnText}>Log payment</Text>
-                </TouchableOpacity>
-              ) : null}
-            </View>
+          {showVisitDetails ? (
+            <TouchableOpacity
+              style={styles.visitDetailsBtn}
+              onPress={(e) => {
+                e?.stopPropagation?.();
+                onVisitDetails?.(item);
+              }}
+            >
+              <Ionicons name="clipboard-outline" size={16} color="#fff" />
+              <Text style={styles.visitDetailsBtnText}>Visit details</Text>
+            </TouchableOpacity>
           ) : null}
         </View>
       </TouchableOpacity>
@@ -643,48 +620,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  logActionsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginLeft: 'auto',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    flex: 1,
-    minWidth: 0,
-  },
-  logServicesBtn: {
+  visitDetailsBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: 12,
-    height: 44,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: theme.colors.primary,
-    backgroundColor: theme.colors.background,
-  },
-  logServicesBtnText: {
-    color: theme.colors.primary,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  logServicesBtnSolo: {
-    marginLeft: 'auto',
-  },
-  logPaymentBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     height: 44,
     borderRadius: 12,
     backgroundColor: theme.colors.primary,
-  },
-  logPaymentBtnSolo: {
     marginLeft: 'auto',
   },
-  logPaymentBtnText: {
+  visitDetailsBtnText: {
     color: '#fff',
     fontSize: 13,
     fontWeight: '700',

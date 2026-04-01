@@ -10,6 +10,7 @@ import {
   Alert,
   Modal,
   FlatList,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,7 +19,8 @@ import { auth, db } from '../firebase';
 import type { Appointment } from '../types';
 import { theme } from '../theme';
 import { useAppointmentsContext } from '../context/AppointmentsContext';
-import { isPayableAppointmentForPayment } from '../utils/appointmentPayable';
+import { isPayableAppointmentForPayment, isEligibleForVisitServicesLogging } from '../utils/appointmentPayable';
+import { submitLogVisitServices, type VisitServicesPayload } from '../api/logVisitServices';
 import {
   submitCollectPayment,
   type PaymentMode,
@@ -76,13 +78,19 @@ const FALLBACK_TRIAL_LOC: FieldOption[] = [
   { optionValue: 'home', optionLabel: 'Home Trial', sortOrder: 20 },
 ];
 
+type HtEntry = { id: string; testType: string; price: string };
+
+function newHtId() {
+  return `ht-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
 type Props = {
   appointmentId: string;
   onBack: () => void;
 };
 
 export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
-  const { appointments } = useAppointmentsContext();
+  const { appointments, isOnline } = useAppointmentsContext();
   const uid = auth.currentUser?.uid;
 
   const [resolved, setResolved] = useState<Appointment | null | undefined>(undefined);
@@ -91,7 +99,30 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
   const [paymentMode, setPaymentMode] = useState<PaymentMode>('cash');
   const [receiptType, setReceiptType] = useState<ReceiptType>('booking');
   const [submitting, setSubmitting] = useState(false);
+  const [savingVisitServices, setSavingVisitServices] = useState(false);
   const [templateLabels, setTemplateLabels] = useState<StaffReceiptTemplateLabels>({});
+
+  const [hearingTest, setHearingTest] = useState(false);
+  const [htEntries, setHtEntries] = useState<HtEntry[]>([{ id: newHtId(), testType: '', price: '' }]);
+  const [testDoneBy, setTestDoneBy] = useState('');
+  const [testResults, setTestResults] = useState('');
+  const [recommendations, setRecommendations] = useState('');
+  const [accessory, setAccessory] = useState(false);
+  const [accessoryName, setAccessoryName] = useState('');
+  const [accessoryDetails, setAccessoryDetails] = useState('');
+  const [accessoryFOC, setAccessoryFOC] = useState(false);
+  const [accessoryAmount, setAccessoryAmount] = useState('');
+  const [accessoryQuantity, setAccessoryQuantity] = useState('1');
+  const [programming, setProgramming] = useState(false);
+  const [programmingReason, setProgrammingReason] = useState('');
+  const [programmingAmount, setProgrammingAmount] = useState('');
+  const [programmingDoneBy, setProgrammingDoneBy] = useState('');
+  const [hearingAidPurchaseDate, setHearingAidPurchaseDate] = useState('');
+  const [hearingAidName, setHearingAidName] = useState('');
+  const [underWarranty, setUnderWarranty] = useState(false);
+  const [warranty, setWarranty] = useState('');
+  const [counselling, setCounselling] = useState(false);
+  const [counsellingNotes, setCounsellingNotes] = useState('');
 
   const [earOptions, setEarOptions] = useState<FieldOption[]>(FALLBACK_EAR);
   const [trialLocOptions, setTrialLocOptions] = useState<FieldOption[]>(FALLBACK_TRIAL_LOC);
@@ -274,7 +305,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
 
   useEffect(() => {
     if (resolved === null && !loading) {
-      Alert.alert('Unavailable', 'This appointment cannot be used for payment logging.', [
+      Alert.alert('Unavailable', 'This appointment cannot be used for visit details (services / payment).', [
         { text: 'OK', onPress: onBack },
       ]);
     }
@@ -472,6 +503,101 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
     }
   };
 
+  const buildVisitServicesPayload = (): { ok: true; services: VisitServicesPayload } | { ok: false; message: string } => {
+    const services: VisitServicesPayload = {};
+    if (hearingTest) {
+      const entries = htEntries
+        .map((e) => ({
+          id: e.id,
+          testType: e.testType.trim(),
+          price: Math.max(0, parseFloat(e.price) || 0),
+        }))
+        .filter((e) => e.testType);
+      if (entries.length === 0) {
+        return { ok: false, message: 'Add at least one hearing test with a test type.' };
+      }
+      services.hearingTest = {
+        hearingTestEntries: entries,
+        testDoneBy: testDoneBy.trim() || undefined,
+        testResults: testResults.trim() || undefined,
+        recommendations: recommendations.trim() || undefined,
+      };
+    }
+    if (accessory) {
+      const name = accessoryName.trim();
+      if (!name) {
+        return { ok: false, message: 'Accessory name is required.' };
+      }
+      services.accessory = {
+        accessoryName: name,
+        accessoryDetails: accessoryDetails.trim() || undefined,
+        accessoryFOC,
+        accessoryAmount:
+          accessoryAmount.trim() !== '' ? Math.max(0, parseFloat(accessoryAmount) || 0) : undefined,
+        accessoryQuantity:
+          accessoryQuantity.trim() !== '' ? Math.max(1, Math.floor(parseFloat(accessoryQuantity) || 1)) : undefined,
+      };
+    }
+    if (programming) {
+      services.programming = {
+        programmingReason: programmingReason.trim() || undefined,
+        programmingAmount:
+          programmingAmount.trim() !== '' ? Math.max(0, parseFloat(programmingAmount) || 0) : undefined,
+        programmingDoneBy: programmingDoneBy.trim() || undefined,
+        hearingAidPurchaseDate: hearingAidPurchaseDate.trim() || undefined,
+        hearingAidName: hearingAidName.trim() || undefined,
+        underWarranty,
+        warranty: warranty.trim() || undefined,
+      };
+    }
+    if (counselling) {
+      services.counselling = { notes: counsellingNotes.trim() || undefined };
+    }
+    if (!services.hearingTest && !services.accessory && !services.programming && !services.counselling) {
+      return { ok: false, message: 'Turn on at least one service, or skip this section.' };
+    }
+    return { ok: true, services };
+  };
+
+  const handleSaveVisitServices = async () => {
+    if (!resolved?.id) return;
+    if (!isOnline) {
+      Alert.alert('Offline', 'Visit logging requires an internet connection.');
+      return;
+    }
+    if (!resolved.enquiryId?.trim()) {
+      Alert.alert('No enquiry', 'Link this appointment to an enquiry in CRM to save visit services.');
+      return;
+    }
+    if (!isEligibleForVisitServicesLogging(resolved)) {
+      Alert.alert('Unavailable', 'Visit services cannot be saved for this appointment.');
+      return;
+    }
+    const built = buildVisitServicesPayload();
+    if (!built.ok) {
+      Alert.alert('Check form', built.message);
+      return;
+    }
+    setSavingVisitServices(true);
+    try {
+      const r = await submitLogVisitServices({
+        appointmentId: resolved.id,
+        services: built.services,
+      });
+      if (!r.ok) {
+        Alert.alert('Error', r.error || 'Failed to save');
+        return;
+      }
+      Alert.alert('Saved', 'Visit services were logged to the enquiry.');
+    } catch (e: unknown) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save');
+    } finally {
+      setSavingVisitServices(false);
+    }
+  };
+
+  const visitFormBusy = submitting || savingVisitServices;
+
   useEffect(() => {
     if (selectedInv) {
       setSaleSelling(String(selectedInv.mrp || 0));
@@ -495,7 +621,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
           <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
             <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Log payment</Text>
+          <Text style={styles.headerTitle}>Visit details</Text>
           <View style={{ width: 40 }} />
         </View>
       </SafeAreaView>
@@ -503,6 +629,8 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
   }
 
   const typeLabel = resolved.type === 'home' ? 'Home visit' : 'Center';
+  const showVisitServicesForm =
+    !!(resolved.enquiryId || '').trim() && isEligibleForVisitServicesLogging(resolved);
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -510,7 +638,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
         <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
           <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Log payment</Text>
+        <Text style={styles.headerTitle}>Visit details</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -523,6 +651,191 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
           <Text style={styles.metaLine}>Time: {formatTime(getStartIso(resolved))}</Text>
         </View>
 
+        <Text style={styles.blockTitle}>Visit services (CRM)</Text>
+        <Text style={styles.visitHint}>
+          Log tests, accessories, programming, and counselling here. Requires internet. Link the appointment to an enquiry
+          in CRM if missing.
+        </Text>
+        {!resolved.enquiryId?.trim() ? (
+          <Text style={styles.visitMuted}>
+            No enquiry linked — connect this appointment to an enquiry in CRM to save visit services.
+          </Text>
+        ) : !showVisitServicesForm ? (
+          <Text style={styles.visitMuted}>Visit services are not available for this appointment.</Text>
+        ) : (
+          <>
+            <View style={[styles.card, styles.visitCard]}>
+              <View style={styles.visitRowBetween}>
+                <Text style={styles.vsSectionTitle}>Hearing test</Text>
+                <Switch value={hearingTest} onValueChange={setHearingTest} disabled={visitFormBusy} />
+              </View>
+              {hearingTest ? (
+                <>
+                  {htEntries.map((row, idx) => (
+                    <View key={row.id} style={styles.htRow}>
+                      <TextInput
+                        style={[styles.input, styles.vsFlex]}
+                        placeholder="Test type"
+                        placeholderTextColor={theme.colors.textMuted}
+                        value={row.testType}
+                        onChangeText={(t) => {
+                          const next = [...htEntries];
+                          next[idx] = { ...row, testType: t };
+                          setHtEntries(next);
+                        }}
+                        editable={!visitFormBusy}
+                      />
+                      <TextInput
+                        style={[styles.input, styles.vsPrice]}
+                        placeholder="₹"
+                        placeholderTextColor={theme.colors.textMuted}
+                        keyboardType="decimal-pad"
+                        value={row.price}
+                        onChangeText={(t) => {
+                          const next = [...htEntries];
+                          next[idx] = { ...row, price: t };
+                          setHtEntries(next);
+                        }}
+                        editable={!visitFormBusy}
+                      />
+                      <TouchableOpacity
+                        onPress={() => setHtEntries((prev) => prev.filter((r) => r.id !== row.id))}
+                        disabled={htEntries.length <= 1 || visitFormBusy}
+                      >
+                        <Ionicons name="trash-outline" size={22} color={theme.colors.error} />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                  <TouchableOpacity
+                    style={styles.vsAddRow}
+                    onPress={() => setHtEntries((prev) => [...prev, { id: newHtId(), testType: '', price: '' }])}
+                    disabled={visitFormBusy}
+                  >
+                    <Ionicons name="add-circle-outline" size={18} color={theme.colors.primary} />
+                    <Text style={styles.vsAddText}>Add test line</Text>
+                  </TouchableOpacity>
+                  <Field label="Test done by" value={testDoneBy} onChangeText={setTestDoneBy} disabled={visitFormBusy} />
+                  <VsMultiline
+                    label="Test results"
+                    value={testResults}
+                    onChangeText={setTestResults}
+                    disabled={visitFormBusy}
+                  />
+                  <VsMultiline
+                    label="Recommendations"
+                    value={recommendations}
+                    onChangeText={setRecommendations}
+                    disabled={visitFormBusy}
+                  />
+                </>
+              ) : null}
+            </View>
+
+            <View style={[styles.card, styles.visitCard]}>
+              <View style={styles.visitRowBetween}>
+                <Text style={styles.vsSectionTitle}>Accessory</Text>
+                <Switch value={accessory} onValueChange={setAccessory} disabled={visitFormBusy} />
+              </View>
+              {accessory ? (
+                <>
+                  <Field label="Accessory name *" value={accessoryName} onChangeText={setAccessoryName} disabled={visitFormBusy} />
+                  <VsMultiline
+                    label="Details"
+                    value={accessoryDetails}
+                    onChangeText={setAccessoryDetails}
+                    disabled={visitFormBusy}
+                  />
+                  <View style={styles.visitRowBetween}>
+                    <Text style={styles.fieldLabel}>Free of charge</Text>
+                    <Switch value={accessoryFOC} onValueChange={setAccessoryFOC} disabled={visitFormBusy} />
+                  </View>
+                  <Field
+                    label="Amount (₹)"
+                    value={accessoryAmount}
+                    onChangeText={setAccessoryAmount}
+                    keyboardType="decimal-pad"
+                    disabled={visitFormBusy}
+                  />
+                  <Field
+                    label="Quantity"
+                    value={accessoryQuantity}
+                    onChangeText={setAccessoryQuantity}
+                    keyboardType="number-pad"
+                    disabled={visitFormBusy}
+                  />
+                </>
+              ) : null}
+            </View>
+
+            <View style={[styles.card, styles.visitCard]}>
+              <View style={styles.visitRowBetween}>
+                <Text style={styles.vsSectionTitle}>Programming</Text>
+                <Switch value={programming} onValueChange={setProgramming} disabled={visitFormBusy} />
+              </View>
+              {programming ? (
+                <>
+                  <VsMultiline
+                    label="Reason"
+                    value={programmingReason}
+                    onChangeText={setProgrammingReason}
+                    disabled={visitFormBusy}
+                  />
+                  <Field
+                    label="Amount (₹)"
+                    value={programmingAmount}
+                    onChangeText={setProgrammingAmount}
+                    keyboardType="decimal-pad"
+                    disabled={visitFormBusy}
+                  />
+                  <Field label="Done by" value={programmingDoneBy} onChangeText={setProgrammingDoneBy} disabled={visitFormBusy} />
+                  <Field
+                    label="HA purchase date"
+                    value={hearingAidPurchaseDate}
+                    onChangeText={setHearingAidPurchaseDate}
+                    disabled={visitFormBusy}
+                  />
+                  <Field label="Hearing aid name" value={hearingAidName} onChangeText={setHearingAidName} disabled={visitFormBusy} />
+                  <View style={styles.visitRowBetween}>
+                    <Text style={styles.fieldLabel}>Under warranty</Text>
+                    <Switch value={underWarranty} onValueChange={setUnderWarranty} disabled={visitFormBusy} />
+                  </View>
+                  <Field label="Warranty" value={warranty} onChangeText={setWarranty} disabled={visitFormBusy} />
+                </>
+              ) : null}
+            </View>
+
+            <View style={[styles.card, styles.visitCard]}>
+              <View style={styles.visitRowBetween}>
+                <Text style={styles.vsSectionTitle}>Counselling</Text>
+                <Switch value={counselling} onValueChange={setCounselling} disabled={visitFormBusy} />
+              </View>
+              {counselling ? (
+                <VsMultiline
+                  label="Notes"
+                  value={counsellingNotes}
+                  onChangeText={setCounsellingNotes}
+                  disabled={visitFormBusy}
+                />
+              ) : null}
+            </View>
+
+            <TouchableOpacity
+              style={[styles.visitSaveBtn, (visitFormBusy || savingVisitServices) && styles.submitBtnDisabled]}
+              onPress={() => void handleSaveVisitServices()}
+              disabled={visitFormBusy || savingVisitServices}
+            >
+              {savingVisitServices ? (
+                <ActivityIndicator color={theme.colors.primary} />
+              ) : (
+                <Text style={styles.visitSaveBtnText}>Save visit services</Text>
+              )}
+            </TouchableOpacity>
+          </>
+        )}
+
+        <Text style={[styles.blockTitle, { marginTop: 8 }]}>Payment & receipt</Text>
+        <Text style={styles.visitHint}>Collect payment for trial, booking, or sale — sent to admin for verification.</Text>
+
         <Text style={styles.fieldLabel}>Payment collected today (₹)</Text>
         <TextInput
           style={styles.input}
@@ -531,7 +844,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
           placeholderTextColor={theme.colors.textMuted}
           value={amount}
           onChangeText={setAmount}
-          editable={!submitting}
+          editable={!visitFormBusy}
         />
 
         <Text style={styles.fieldLabel}>Payment mode</Text>
@@ -541,7 +854,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
               key={m}
               style={[styles.chip, paymentMode === m && styles.chipActive]}
               onPress={() => setPaymentMode(m)}
-              disabled={submitting}
+              disabled={visitFormBusy}
             >
               <Text style={[styles.chipText, paymentMode === m && styles.chipTextActive]}>{m.toUpperCase()}</Text>
             </TouchableOpacity>
@@ -555,7 +868,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
               key={t}
               style={[styles.chip, receiptType === t && styles.chipActive]}
               onPress={() => setReceiptType(t)}
-              disabled={submitting}
+              disabled={visitFormBusy}
             >
               <Text style={[styles.chipText, receiptType === t && styles.chipTextActive]}>{t}</Text>
             </TouchableOpacity>
@@ -582,7 +895,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
         {receiptType === 'booking' ? (
           <View style={styles.block}>
             <Text style={styles.blockTitle}>Booking — catalog device (CRM)</Text>
-            <TouchableOpacity style={styles.pickBtn} onPress={() => openCatalog('booking')} disabled={submitting}>
+            <TouchableOpacity style={styles.pickBtn} onPress={() => openCatalog('booking')} disabled={visitFormBusy}>
               <Text style={styles.pickBtnText}>
                 {bookingProduct
                   ? `${bookingProduct.company} · ${bookingProduct.name} (${bookingProduct.type})`
@@ -610,7 +923,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
         {receiptType === 'trial' ? (
           <View style={styles.block}>
             <Text style={styles.blockTitle}>Trial — catalog + trial type (CRM)</Text>
-            <TouchableOpacity style={styles.pickBtn} onPress={() => openCatalog('trial')} disabled={submitting}>
+            <TouchableOpacity style={styles.pickBtn} onPress={() => openCatalog('trial')} disabled={visitFormBusy}>
               <Text style={styles.pickBtnText}>
                 {trialProduct
                   ? `${trialProduct.company} · ${trialProduct.name} (${trialProduct.type})`
@@ -651,7 +964,11 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
                 <Field label="Trial period (days)" value={trialDuration} onChangeText={setTrialDuration} keyboardType="number-pad" />
                 <Field label="Trial start (YYYY-MM-DD)" value={trialStart} onChangeText={setTrialStart} />
                 <Field label="Trial end (YYYY-MM-DD)" value={trialEnd} onChangeText={setTrialEnd} />
-                <TouchableOpacity style={styles.pickBtn} onPress={() => setInvModal(true)} disabled={inventoryLoading}>
+                <TouchableOpacity
+                  style={styles.pickBtn}
+                  onPress={() => setInvModal(true)}
+                  disabled={inventoryLoading || visitFormBusy}
+                >
                   {inventoryLoading ? (
                     <ActivityIndicator color={theme.colors.primary} />
                   ) : (
@@ -689,7 +1006,11 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
                 </TouchableOpacity>
               ))}
             </View>
-            <TouchableOpacity style={styles.pickBtn} onPress={() => setInvModal(true)} disabled={inventoryLoading}>
+            <TouchableOpacity
+              style={styles.pickBtn}
+              onPress={() => setInvModal(true)}
+              disabled={inventoryLoading || visitFormBusy}
+            >
               {inventoryLoading ? (
                 <ActivityIndicator color={theme.colors.primary} />
               ) : (
@@ -711,14 +1032,14 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
         ) : null}
 
         <TouchableOpacity
-          style={[styles.submitBtn, submitting && styles.submitBtnDisabled]}
+          style={[styles.submitBtn, visitFormBusy && styles.submitBtnDisabled]}
           onPress={() => void handleSubmit()}
-          disabled={submitting}
+          disabled={visitFormBusy}
         >
           {submitting ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.submitText}>Send to admin</Text>
+            <Text style={styles.submitText}>Send payment to admin</Text>
           )}
         </TouchableOpacity>
       </ScrollView>
@@ -816,11 +1137,13 @@ function Field({
   value,
   onChangeText,
   keyboardType = 'default',
+  disabled,
 }: {
   label: string;
   value: string;
   onChangeText: (t: string) => void;
   keyboardType?: 'default' | 'decimal-pad' | 'number-pad';
+  disabled?: boolean;
 }) {
   return (
     <>
@@ -831,6 +1154,33 @@ function Field({
         onChangeText={onChangeText}
         keyboardType={keyboardType}
         placeholderTextColor={theme.colors.textMuted}
+        editable={!disabled}
+      />
+    </>
+  );
+}
+
+function VsMultiline({
+  label,
+  value,
+  onChangeText,
+  disabled,
+}: {
+  label: string;
+  value: string;
+  onChangeText: (t: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <TextInput
+        style={[styles.input, styles.textArea]}
+        value={value}
+        onChangeText={onChangeText}
+        placeholderTextColor={theme.colors.textMuted}
+        multiline
+        editable={!disabled}
       />
     </>
   );
@@ -1017,5 +1367,69 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 24,
     color: theme.colors.textMuted,
+  },
+  visitHint: {
+    fontSize: 13,
+    color: theme.colors.textSecondary,
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  visitMuted: {
+    fontSize: 14,
+    color: theme.colors.textMuted,
+    marginBottom: 16,
+    lineHeight: 22,
+  },
+  visitCard: {
+    marginBottom: 12,
+  },
+  visitRowBetween: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  vsSectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: theme.colors.text,
+  },
+  htRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  vsFlex: {
+    flex: 1,
+  },
+  vsPrice: {
+    width: 88,
+    marginBottom: 0,
+  },
+  vsAddRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 12,
+  },
+  vsAddText: {
+    color: theme.colors.primary,
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  visitSaveBtn: {
+    borderWidth: 2,
+    borderColor: theme.colors.primary,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginBottom: 20,
+    backgroundColor: theme.colors.background,
+  },
+  visitSaveBtnText: {
+    color: theme.colors.primary,
+    fontSize: 16,
+    fontWeight: '700',
   },
 });

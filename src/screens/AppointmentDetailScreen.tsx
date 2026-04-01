@@ -18,13 +18,13 @@ import { db } from '../firebase';
 import type { Appointment } from '../types';
 import { theme } from '../theme';
 import { useAppointmentsContext } from '../context/AppointmentsContext';
-import { isEligibleForVisitServicesLogging } from '../utils/appointmentPayable';
+import { isPayableAppointmentForPayment } from '../utils/appointmentPayable';
 
 interface AppointmentDetailScreenProps {
   appointment: Appointment;
   onBack: () => void;
-  /** Navigate to staff visit-services flow (CRM enquiry visit; requires linked enquiry). */
-  onLogVisitServices?: () => void;
+  /** Visit services + payment in one screen (same as list quick action). */
+  onVisitDetails?: () => void;
 }
 
 function formatDate(iso: string) {
@@ -51,7 +51,7 @@ function getStatusConfig(status?: string) {
 export default function AppointmentDetailScreen({
   appointment,
   onBack,
-  onLogVisitServices,
+  onVisitDetails,
 }: AppointmentDetailScreenProps) {
   const { isOnline, updateAppointmentOptimistic, markCompletedOffline, markCancelledOffline } = useAppointmentsContext();
   const [feedback, setFeedback] = useState('');
@@ -61,7 +61,7 @@ export default function AppointmentDetailScreen({
 
   const isScheduled = appointment.status === 'scheduled' || !appointment.status;
   const statusConfig = getStatusConfig(appointment.status);
-  const showVisitServices = Boolean(onLogVisitServices) && isEligibleForVisitServicesLogging(appointment);
+  const showVisitDetails = Boolean(onVisitDetails) && isPayableAppointmentForPayment(appointment);
 
   useEffect(() => {
     const resolved = appointment.centerName;
@@ -281,15 +281,15 @@ export default function AppointmentDetailScreen({
 
         {isScheduled && (
           <View style={styles.actions}>
-            {showVisitServices ? (
+            {showVisitDetails ? (
               <TouchableOpacity
                 style={[styles.actionButton, styles.servicesOutlineButton]}
-                onPress={onLogVisitServices}
+                onPress={onVisitDetails}
                 disabled={saving}
                 activeOpacity={0.85}
               >
-                <Ionicons name="medical-outline" size={20} color={theme.colors.primary} />
-                <Text style={styles.servicesOutlineButtonText}>Log visit services</Text>
+                <Ionicons name="clipboard-outline" size={20} color={theme.colors.primary} />
+                <Text style={styles.servicesOutlineButtonText}>Visit details</Text>
               </TouchableOpacity>
             ) : null}
             <TouchableOpacity
