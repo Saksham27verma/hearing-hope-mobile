@@ -46,6 +46,12 @@ import {
 import { fetchAvailableInventory, type StaffInventoryRow } from '../api/staffInventory';
 import { fetchStaffEnquiryConfig, type FieldOption } from '../api/staffEnquiryConfig';
 import { fetchStaffProductsCatalog, type CatalogProduct } from '../api/staffProductsCatalog';
+import {
+  derivedDiscountPercentFromMrpSelling,
+  HEARING_AID_SALE_WARRANTY_OPTIONS,
+  lineInclusiveTotal,
+  roundInrRupee,
+} from '../utils/saleLineMath';
 
 function formatTime(iso: string) {
   if (!iso) return '—';
@@ -101,6 +107,19 @@ type HtEntry = { id: string; testType: string; price: string; testTypeCustom?: b
 
 function newHtId() {
   return `ht-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+type SaleLineDraft = {
+  id: string;
+  inv: StaffInventoryRow | null;
+  sellingPrice: string;
+  gstPercent: string;
+  qty: string;
+  warranty: string;
+};
+
+function newSaleLineId() {
+  return `sl-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
 type Props = {
@@ -230,12 +249,10 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
   const [inventoryLoading, setInventoryLoading] = useState(false);
   const [invModal, setInvModal] = useState(false);
   const [invSearch, setInvSearch] = useState('');
-  const [selectedInv, setSelectedInv] = useState<StaffInventoryRow | null>(null);
+  /** When picking inventory for invoice, which sale line is being filled (`null` = trial home serial). */
+  const [invModalLineId, setInvModalLineId] = useState<string | null>(null);
+  const [saleLines, setSaleLines] = useState<SaleLineDraft[]>([]);
   const [saleEar, setSaleEar] = useState('both');
-  const [saleSelling, setSaleSelling] = useState('');
-  const [saleDiscount, setSaleDiscount] = useState('0');
-  const [saleGst, setSaleGst] = useState('18');
-  const [saleQty, setSaleQty] = useState('1');
 
   const [catalogModal, setCatalogModal] = useState(false);
   const [catalogIntent, setCatalogIntent] = useState<'booking' | 'trial'>('booking');
@@ -384,6 +401,15 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
     if (receiptType === 'trial' && trialLoc === 'home' && trialProduct) {
       base = base.filter((it) => it.productId === trialProduct.id);
     }
+    if (receiptType === 'invoice' && invModalLineId != null) {
+      const taken = new Set(
+        saleLines
+          .filter((l) => l.id !== invModalLineId)
+          .filter((l) => l.inv)
+          .map((l) => `${l.inv!.productId}::${l.inv!.serialNumber}`)
+      );
+      base = base.filter((it) => !taken.has(`${it.productId}::${it.serialNumber}`));
+    }
     const q = invSearch.trim().toLowerCase();
     if (!q) return base.slice(0, 80);
     return base
@@ -395,7 +421,24 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
           it.serialNumber.toLowerCase().includes(q)
       )
       .slice(0, 80);
-  }, [inventoryItems, invSearch, receiptType, trialLoc, trialProduct]);
+  }, [inventoryItems, invSearch, receiptType, trialLoc, trialProduct, saleLines, invModalLineId]);
+
+  const suggestedInvoiceTotal = useMemo(() => {
+    let sum = 0;
+    for (const line of saleLines) {
+      if (!line.inv) continue;
+      const sp = parseFloat(line.sellingPrice.replace(/,/g, '')) || 0;
+      const gst = parseFloat(line.gstPercent) || 0;
+      const qty = Math.max(1, Math.floor(parseFloat(line.qty) || 1));
+      sum += lineInclusiveTotal(line.inv.mrp, sp, gst, qty);
+    }
+    return roundInrRupee(sum);
+  }, [saleLines]);
+
+  useEffect(() => {
+    if (receiptType !== 'invoice') return;
+    if (suggestedInvoiceTotal > 0) setAmount(String(suggestedInvoiceTotal));
+  }, [receiptType, suggestedInvoiceTotal]);
 
   const currentPdfTemplate = useMemo(() => {
     if (receiptType === 'booking') return templateLabels.booking;
@@ -573,25 +616,32 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
     }
 
     if (receiptType === 'invoice') {
-      if (!selectedInv) {
-        Alert.alert('Select device', 'Choose a hearing aid from inventory (serial).');
+      const filled = saleLines.filter((l) => l.inv);
+      if (filled.length === 0) {
+        Alert.alert('Add sale lines', 'Add at least one line and pick inventory (serial) for each.');
         return;
       }
-      const sp = Number(saleSelling);
-      const disc = Number(saleDiscount);
-      const gst = Number(saleGst);
-      const qty = Number(saleQty);
-      if (!Number.isFinite(sp) || sp < 0) {
-        Alert.alert('Invalid selling price', 'Enter selling price per unit.');
-        return;
-      }
-      if (!Number.isFinite(disc) || disc < 0 || disc > 100 || !Number.isFinite(gst) || gst < 0) {
-        Alert.alert('Invalid %', 'Check discount and GST.');
-        return;
-      }
-      if (!Number.isFinite(qty) || qty < 1) {
-        Alert.alert('Invalid quantity', 'Enter quantity.');
-        return;
+      for (const line of filled) {
+        const inv = line.inv!;
+        const sp = Number(line.sellingPrice.replace(/,/g, ''));
+        const gst = Number(line.gstPercent);
+        const qty = Number(line.qty);
+        if (!Number.isFinite(sp) || sp < 0) {
+          Alert.alert('Invalid selling price', 'Enter pre-tax selling price per unit for each line.');
+          return;
+        }
+        if (!Number.isFinite(gst) || gst < 0) {
+          Alert.alert('Invalid GST', 'Check GST % on each line.');
+          return;
+        }
+        if (!Number.isFinite(qty) || qty < 1) {
+          Alert.alert('Invalid quantity', 'Enter quantity on each line.');
+          return;
+        }
+        if (inv.mrp > 0 && sp > inv.mrp) {
+          Alert.alert('Selling price', `Selling cannot exceed MRP for ${inv.name}.`);
+          return;
+        }
       }
     }
 
@@ -625,16 +675,29 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
               }
             : {
                 sale: {
-                  productId: selectedInv!.productId,
-                  name: selectedInv!.name,
-                  company: selectedInv!.company,
-                  serialNumber: selectedInv!.serialNumber,
-                  mrp: selectedInv!.mrp,
-                  sellingPrice: Number(saleSelling),
-                  discountPercent: Number(saleDiscount),
-                  gstPercent: Number(saleGst),
-                  quantity: Math.max(1, Math.floor(Number(saleQty) || 1)),
                   whichEar: saleEar as 'left' | 'right' | 'both',
+                  products: saleLines
+                    .filter((l) => l.inv)
+                    .map((l) => {
+                      const inv = l.inv!;
+                      const sp = Number(l.sellingPrice.replace(/,/g, ''));
+                      const gst = Number(l.gstPercent);
+                      const qty = Math.max(1, Math.floor(Number(l.qty) || 1));
+                      const disc = derivedDiscountPercentFromMrpSelling(inv.mrp, sp);
+                      const w = l.warranty.trim();
+                      return {
+                        productId: inv.productId,
+                        name: inv.name,
+                        company: inv.company,
+                        serialNumber: inv.serialNumber,
+                        mrp: inv.mrp,
+                        sellingPrice: sp,
+                        discountPercent: disc,
+                        gstPercent: gst,
+                        quantity: qty,
+                        ...(w ? { warranty: w } : {}),
+                      };
+                    }),
                 },
               };
 
@@ -753,12 +816,6 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
   };
 
   const visitFormBusy = submitting || savingVisitServices;
-
-  useEffect(() => {
-    if (selectedInv) {
-      setSaleSelling(String(selectedInv.mrp || 0));
-    }
-  }, [selectedInv]);
 
   if (loading || resolved === undefined) {
     return (
@@ -1246,7 +1303,10 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
                 <Field label="Trial end (YYYY-MM-DD)" value={trialEnd} onChangeText={setTrialEnd} />
                 <TouchableOpacity
                   style={styles.pickBtn}
-                  onPress={() => setInvModal(true)}
+                  onPress={() => {
+                    setInvModalLineId(null);
+                    setInvModal(true);
+                  }}
                   disabled={inventoryLoading || visitFormBusy}
                 >
                   {inventoryLoading ? (
@@ -1274,6 +1334,9 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
         {receiptType === 'invoice' ? (
           <View style={styles.block}>
             <Text style={styles.blockTitle}>Sale — inventory (CRM)</Text>
+            <Text style={styles.visitHint}>
+              Same pricing as CRM enquiry: set selling price (pre-tax); discount % is derived from MRP vs selling.
+            </Text>
             <Text style={styles.fieldLabel}>Which ear</Text>
             <View style={styles.chipRow}>
               {earOptions.map((o) => (
@@ -1286,27 +1349,140 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
                 </TouchableOpacity>
               ))}
             </View>
+            {saleLines.map((line) => {
+              const inv = line.inv;
+              const sp = parseFloat(line.sellingPrice.replace(/,/g, '')) || 0;
+              const gst = parseFloat(line.gstPercent) || 0;
+              const qty = Math.max(1, Math.floor(parseFloat(line.qty) || 1));
+              const discPct =
+                inv && inv.mrp > 0 ? derivedDiscountPercentFromMrpSelling(inv.mrp, sp) : 0;
+              const lineTot =
+                inv != null ? lineInclusiveTotal(inv.mrp, sp, gst, qty) : 0;
+              return (
+                <View key={line.id} style={{ marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: theme.colors.border }}>
+                  <View style={styles.visitRowBetween}>
+                    <Text style={styles.blockTitle}>Line</Text>
+                    <TouchableOpacity
+                      onPress={() => setSaleLines((prev) => prev.filter((x) => x.id !== line.id))}
+                      disabled={visitFormBusy}
+                      hitSlop={{ top: 8, bottom: 8 }}
+                    >
+                      <Trash2 size={20} color={theme.colors.textSecondary} strokeWidth={LUCIDE_STROKE} />
+                    </TouchableOpacity>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.pickBtn}
+                    onPress={() => {
+                      setInvModalLineId(line.id);
+                      setInvModal(true);
+                    }}
+                    disabled={inventoryLoading || visitFormBusy}
+                  >
+                    {inventoryLoading ? (
+                      <ActivityIndicator color={theme.colors.primary} />
+                    ) : (
+                      <Text style={styles.pickBtnText}>
+                        {inv
+                          ? `${inv.name} · SN ${inv.serialNumber}`
+                          : 'Select hearing aid (serial)'}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                  {inv ? (
+                    <>
+                      <Text style={styles.metaLine}>MRP: ₹{inv.mrp}</Text>
+                      <Text style={styles.metaLine}>Discount (derived): {discPct}%</Text>
+                      <Field
+                        label="Selling price (pre-tax / unit) ₹"
+                        value={line.sellingPrice}
+                        onChangeText={(t) =>
+                          setSaleLines((prev) =>
+                            prev.map((l) => (l.id === line.id ? { ...l, sellingPrice: t } : l))
+                          )
+                        }
+                        keyboardType="decimal-pad"
+                      />
+                      <Field
+                        label="GST %"
+                        value={line.gstPercent}
+                        onChangeText={(t) =>
+                          setSaleLines((prev) =>
+                            prev.map((l) => (l.id === line.id ? { ...l, gstPercent: t } : l))
+                          )
+                        }
+                        keyboardType="decimal-pad"
+                      />
+                      <Field
+                        label="Quantity"
+                        value={line.qty}
+                        onChangeText={(t) =>
+                          setSaleLines((prev) =>
+                            prev.map((l) => (l.id === line.id ? { ...l, qty: t } : l))
+                          )
+                        }
+                        keyboardType="number-pad"
+                      />
+                      <Text style={styles.metaLine}>Line total (incl. GST): ₹{lineTot}</Text>
+                      <Text style={styles.fieldLabel}>Warranty</Text>
+                      <View style={[styles.chipRow, { flexWrap: 'wrap' }]}>
+                        {HEARING_AID_SALE_WARRANTY_OPTIONS.map((opt) => (
+                          <TouchableOpacity
+                            key={opt}
+                            style={[styles.chip, line.warranty === opt && styles.chipActive]}
+                            onPress={() =>
+                              setSaleLines((prev) =>
+                                prev.map((l) => (l.id === line.id ? { ...l, warranty: opt } : l))
+                              )
+                            }
+                          >
+                            <Text
+                              style={[styles.chipText, line.warranty === opt && styles.chipTextActive]}
+                            >
+                              {opt}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                      <Field
+                        label="Warranty (custom)"
+                        value={line.warranty}
+                        onChangeText={(t) =>
+                          setSaleLines((prev) =>
+                            prev.map((l) => (l.id === line.id ? { ...l, warranty: t } : l))
+                          )
+                        }
+                      />
+                    </>
+                  ) : null}
+                </View>
+              );
+            })}
             <TouchableOpacity
-              style={styles.pickBtn}
-              onPress={() => setInvModal(true)}
-              disabled={inventoryLoading || visitFormBusy}
+              style={[styles.pickBtn, { marginTop: 12, borderStyle: 'dashed' as const }]}
+              onPress={() =>
+                setSaleLines((prev) => [
+                  ...prev,
+                  {
+                    id: newSaleLineId(),
+                    inv: null,
+                    sellingPrice: '',
+                    gstPercent: '18',
+                    qty: '1',
+                    warranty: '',
+                  },
+                ])
+              }
+              disabled={visitFormBusy}
             >
-              {inventoryLoading ? (
-                <ActivityIndicator color={theme.colors.primary} />
-              ) : (
-                <Text style={styles.pickBtnText}>
-                  {selectedInv ? `${selectedInv.name} · SN ${selectedInv.serialNumber}` : 'Select hearing aid (serial)'}
-                </Text>
-              )}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <CirclePlus size={18} color={theme.colors.primary} strokeWidth={LUCIDE_STROKE} />
+                <Text style={styles.pickBtnText}>Add line</Text>
+              </View>
             </TouchableOpacity>
-            {selectedInv ? (
-              <>
-                <Text style={styles.metaLine}>MRP: ₹{selectedInv.mrp}</Text>
-                <Field label="Selling price (per unit) ₹" value={saleSelling} onChangeText={setSaleSelling} keyboardType="decimal-pad" />
-                <Field label="Discount %" value={saleDiscount} onChangeText={setSaleDiscount} keyboardType="decimal-pad" />
-                <Field label="GST %" value={saleGst} onChangeText={setSaleGst} keyboardType="decimal-pad" />
-                <Field label="Quantity" value={saleQty} onChangeText={setSaleQty} keyboardType="number-pad" />
-              </>
+            {suggestedInvoiceTotal > 0 ? (
+              <Text style={[styles.metaLine, { marginTop: 10 }]}>
+                Suggested payment (sum of lines): ₹{suggestedInvoiceTotal}
+              </Text>
             ) : null}
           </View>
         ) : null}
@@ -1404,10 +1580,22 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
         </SafeAreaView>
       </Modal>
 
-      <Modal visible={invModal} animationType="slide" onRequestClose={() => setInvModal(false)}>
+      <Modal
+        visible={invModal}
+        animationType="slide"
+        onRequestClose={() => {
+          setInvModal(false);
+          setInvModalLineId(null);
+        }}
+      >
         <SafeAreaView style={styles.modalWrap}>
           <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => setInvModal(false)}>
+            <TouchableOpacity
+              onPress={() => {
+                setInvModal(false);
+                setInvModalLineId(null);
+              }}
+            >
               <Text style={styles.modalClose}>Close</Text>
             </TouchableOpacity>
             <Text style={styles.modalTitle}>Available stock</Text>
@@ -1426,12 +1614,25 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
               <TouchableOpacity
                 style={styles.invRow}
                 onPress={() => {
-                  if (receiptType === 'invoice') {
-                    setSelectedInv(item);
+                  if (receiptType === 'invoice' && invModalLineId != null) {
+                    setSaleLines((prev) =>
+                      prev.map((l) =>
+                        l.id === invModalLineId
+                          ? {
+                              ...l,
+                              inv: item,
+                              sellingPrice: String(item.mrp ?? 0),
+                              gstPercent: '18',
+                              qty: '1',
+                            }
+                          : l
+                      )
+                    );
                   } else if (receiptType === 'trial' && trialLoc === 'home') {
                     setTrialSerial(item.serialNumber);
                   }
                   setInvModal(false);
+                  setInvModalLineId(null);
                 }}
               >
                 <Text style={styles.invName}>{item.name}</Text>
