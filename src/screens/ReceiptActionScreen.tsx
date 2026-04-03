@@ -48,6 +48,8 @@ import { fetchStaffEnquiryConfig, type FieldOption } from '../api/staffEnquiryCo
 import { fetchStaffProductsCatalog, type CatalogProduct } from '../api/staffProductsCatalog';
 import {
   derivedDiscountPercentFromMrpSelling,
+  effectiveGstPercentFromCatalogProduct,
+  effectiveGstPercentFromInventoryRow,
   HEARING_AID_SALE_WARRANTY_OPTIONS,
   lineInclusiveTotal,
   roundInrRupee,
@@ -244,6 +246,11 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
   const [trialSerial, setTrialSerial] = useState('');
   const [trialDeposit, setTrialDeposit] = useState('');
   const [trialNotes, setTrialNotes] = useState('');
+  const [trialProduct2, setTrialProduct2] = useState<CatalogProduct | null>(null);
+  const [trialMrp2, setTrialMrp2] = useState('');
+  const [trialSerial2, setTrialSerial2] = useState('');
+  /** Which trial home serial slot the inventory modal is filling. */
+  const [trialHomeSerialPick, setTrialHomeSerialPick] = useState<'1' | '2' | null>(null);
 
   const [inventoryItems, setInventoryItems] = useState<StaffInventoryRow[]>([]);
   const [inventoryLoading, setInventoryLoading] = useState(false);
@@ -255,7 +262,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
   const [saleEar, setSaleEar] = useState('both');
 
   const [catalogModal, setCatalogModal] = useState(false);
-  const [catalogIntent, setCatalogIntent] = useState<'booking' | 'trial'>('booking');
+  const [catalogIntent, setCatalogIntent] = useState<'booking' | 'trial' | 'trial2'>('booking');
   const [catalogSearch, setCatalogSearch] = useState('');
   const [catalogItems, setCatalogItems] = useState<CatalogProduct[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
@@ -402,8 +409,19 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
 
   const filteredInv = useMemo(() => {
     let base = inventoryItems;
-    if (receiptType === 'trial' && trialLoc === 'home' && trialProduct) {
-      base = base.filter((it) => it.productId === trialProduct.id);
+    if (receiptType === 'trial' && trialLoc === 'home') {
+      const ids = new Set<string>();
+      if (trialProduct) ids.add(trialProduct.id);
+      if (trialProduct2) ids.add(trialProduct2.id);
+      if (ids.size > 0) base = base.filter((it) => ids.has(it.productId));
+      if (trialProduct && trialProduct2 && trialProduct.id === trialProduct2.id) {
+        if (trialHomeSerialPick === '1' && trialSerial2.trim()) {
+          base = base.filter((it) => it.serialNumber !== trialSerial2.trim());
+        }
+        if (trialHomeSerialPick === '2' && trialSerial.trim()) {
+          base = base.filter((it) => it.serialNumber !== trialSerial.trim());
+        }
+      }
     }
     if (receiptType === 'invoice' && invModalLineId != null) {
       const taken = new Set(
@@ -425,7 +443,19 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
           it.serialNumber.toLowerCase().includes(q)
       )
       .slice(0, 80);
-  }, [inventoryItems, invSearch, receiptType, trialLoc, trialProduct, saleLines, invModalLineId]);
+  }, [
+    inventoryItems,
+    invSearch,
+    receiptType,
+    trialLoc,
+    trialProduct,
+    trialProduct2,
+    trialHomeSerialPick,
+    trialSerial,
+    trialSerial2,
+    saleLines,
+    invModalLineId,
+  ]);
 
   const suggestedInvoiceTotal = useMemo(() => {
     let sum = 0;
@@ -555,11 +585,24 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
   }, [trialProduct]);
 
   useEffect(() => {
+    setTrialProduct2(null);
+    setTrialMrp2('');
+    setTrialSerial2('');
+  }, [trialProduct?.id]);
+
+  useEffect(() => {
+    if (trialProduct2) {
+      setTrialMrp2(String(trialProduct2.mrp ?? 0));
+    }
+  }, [trialProduct2]);
+
+  useEffect(() => {
     if (trialLoc === 'in_office') {
       setTrialDuration('0');
       setTrialStart('');
       setTrialEnd('');
       setTrialSerial('');
+      setTrialSerial2('');
       setTrialDeposit('0');
     } else {
       setTrialDuration((d) => (d === '0' ? '7' : d));
@@ -579,7 +622,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
     }
   }, [trialDuration, trialStart, trialLoc]);
 
-  const openCatalog = (intent: 'booking' | 'trial') => {
+  const openCatalog = (intent: 'booking' | 'trial' | 'trial2') => {
     setCatalogIntent(intent);
     setCatalogSearch('');
     setCatalogModal(true);
@@ -633,8 +676,19 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
           return;
         }
         if (!trialSerial.trim()) {
-          Alert.alert('Serial', 'Select or enter the inventory serial for home trial.');
+          Alert.alert('Serial', 'Select or enter the inventory serial for home trial (device 1).');
           return;
+        }
+        if (trialProduct2) {
+          if (!trialSerial2.trim()) {
+            Alert.alert('Serial', 'Select the second inventory serial for home trial.');
+            return;
+          }
+          const m2 = Number(trialMrp2);
+          if (!Number.isFinite(m2) || m2 < 0) {
+            Alert.alert('MRP', 'Enter MRP for device 2.');
+            return;
+          }
         }
         const dep = Number(trialDeposit);
         if (!Number.isFinite(dep) || dep < 0) {
@@ -691,6 +745,13 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
             ? {
                 trial: {
                   catalogProductId: trialProduct!.id,
+                  ...(trialProduct2
+                    ? {
+                        secondCatalogProductId: trialProduct2.id,
+                        secondHearingAidPrice: Number(trialMrp2),
+                        secondTrialSerialNumber: trialLoc === 'home' ? trialSerial2.trim() : '',
+                      }
+                    : {}),
                   trialLocationType: trialLoc,
                   whichEar: trialEar as 'left' | 'right' | 'both',
                   hearingAidPrice: Number(trialMrp),
@@ -1283,6 +1344,12 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
             <Field label="MRP (per unit) ₹" value={bookingMrp} onChangeText={setBookingMrp} keyboardType="decimal-pad" />
             <Field label="Selling price (per unit) ₹" value={bookingSelling} onChangeText={setBookingSelling} keyboardType="decimal-pad" />
             <Field label="Quantity" value={bookingQty} onChangeText={setBookingQty} keyboardType="number-pad" />
+            {bookingProduct ? (
+              <Text style={styles.metaLine}>
+                GST % (from catalog): {effectiveGstPercentFromCatalogProduct(bookingProduct)}%
+                {bookingProduct.gstApplicable === false ? ' · GST exempt' : ''}
+              </Text>
+            ) : null}
           </View>
         ) : null}
 
@@ -1293,9 +1360,44 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
               <Text style={styles.pickBtnText}>
                 {trialProduct
                   ? `${trialProduct.company} · ${trialProduct.name} (${trialProduct.type})`
-                  : 'Select from product catalog'}
+                  : 'Select from product catalog (device 1)'}
               </Text>
             </TouchableOpacity>
+            {trialProduct ? (
+              <Text style={styles.metaLine}>
+                GST % (device 1, from catalog): {effectiveGstPercentFromCatalogProduct(trialProduct)}%
+                {trialProduct.gstApplicable === false ? ' · GST exempt' : ''}
+              </Text>
+            ) : null}
+            {trialProduct && !trialProduct2 ? (
+              <TouchableOpacity
+                style={[styles.pickBtn, { marginTop: 10, borderStyle: 'dashed' as const }]}
+                onPress={() => openCatalog('trial2')}
+                disabled={visitFormBusy}
+              >
+                <Text style={styles.pickBtnText}>+ Add second device (optional, max 2)</Text>
+              </TouchableOpacity>
+            ) : null}
+            {trialProduct2 ? (
+              <View style={{ marginTop: 12 }}>
+                <View style={styles.visitRowBetween}>
+                  <Text style={styles.fieldLabel}>Device 2</Text>
+                  <TouchableOpacity onPress={() => setTrialProduct2(null)} disabled={visitFormBusy}>
+                    <Text style={styles.modalClose}>Remove</Text>
+                  </TouchableOpacity>
+                </View>
+                <TouchableOpacity style={styles.pickBtn} onPress={() => openCatalog('trial2')} disabled={visitFormBusy}>
+                  <Text style={styles.pickBtnText}>
+                    {trialProduct2.company} · {trialProduct2.name} ({trialProduct2.type})
+                  </Text>
+                </TouchableOpacity>
+                <Text style={styles.metaLine}>
+                  GST % (device 2, from catalog): {effectiveGstPercentFromCatalogProduct(trialProduct2)}%
+                  {trialProduct2.gstApplicable === false ? ' · GST exempt' : ''}
+                </Text>
+                <Field label="MRP device 2 (per unit) ₹" value={trialMrp2} onChangeText={setTrialMrp2} keyboardType="decimal-pad" />
+              </View>
+            ) : null}
             <Text style={styles.fieldLabel}>Trial type</Text>
             <View style={styles.chipRow}>
               {trialLocOptions.map((o) => {
@@ -1330,9 +1432,11 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
                 <Field label="Trial period (days)" value={trialDuration} onChangeText={setTrialDuration} keyboardType="number-pad" />
                 <Field label="Trial start (YYYY-MM-DD)" value={trialStart} onChangeText={setTrialStart} />
                 <Field label="Trial end (YYYY-MM-DD)" value={trialEnd} onChangeText={setTrialEnd} />
+                <Text style={styles.fieldLabel}>Serial — device 1</Text>
                 <TouchableOpacity
                   style={styles.pickBtn}
                   onPress={() => {
+                    setTrialHomeSerialPick('1');
                     setInvModalLineId(null);
                     setInvModal(true);
                   }}
@@ -1346,6 +1450,28 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
                     </Text>
                   )}
                 </TouchableOpacity>
+                {trialProduct2 ? (
+                  <>
+                    <Text style={styles.fieldLabel}>Serial — device 2</Text>
+                    <TouchableOpacity
+                      style={styles.pickBtn}
+                      onPress={() => {
+                        setTrialHomeSerialPick('2');
+                        setInvModalLineId(null);
+                        setInvModal(true);
+                      }}
+                      disabled={inventoryLoading || visitFormBusy}
+                    >
+                      {inventoryLoading ? (
+                        <ActivityIndicator color={theme.colors.primary} />
+                      ) : (
+                        <Text style={styles.pickBtnText}>
+                          {trialSerial2 ? `Serial: ${trialSerial2}` : 'Select second serial'}
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                  </>
+                ) : null}
                 <Field label="Security deposit ₹" value={trialDeposit} onChangeText={setTrialDeposit} keyboardType="decimal-pad" />
               </>
             ) : null}
@@ -1432,7 +1558,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
                         keyboardType="decimal-pad"
                       />
                       <Field
-                        label="GST %"
+                        label="GST % (from product when serial selected)"
                         value={line.gstPercent}
                         onChangeText={(t) =>
                           setSaleLines((prev) =>
@@ -1440,6 +1566,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
                           )
                         }
                         keyboardType="decimal-pad"
+                        disabled={!!inv}
                       />
                       <Field
                         label="Quantity"
@@ -1593,7 +1720,9 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
                   style={styles.invRow}
                   onPress={() => {
                     if (catalogIntent === 'booking') setBookingProduct(item);
-                    else setTrialProduct(item);
+                    else if (catalogIntent === 'trial2') {
+                      setTrialProduct2(item);
+                    } else setTrialProduct(item);
                     setCatalogModal(false);
                   }}
                 >
@@ -1615,6 +1744,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
         onRequestClose={() => {
           setInvModal(false);
           setInvModalLineId(null);
+          setTrialHomeSerialPick(null);
         }}
       >
         <SafeAreaView style={styles.modalWrap}>
@@ -1623,11 +1753,18 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
               onPress={() => {
                 setInvModal(false);
                 setInvModalLineId(null);
+                setTrialHomeSerialPick(null);
               }}
             >
               <Text style={styles.modalClose}>Close</Text>
             </TouchableOpacity>
-            <Text style={styles.modalTitle}>Available stock</Text>
+            <Text style={styles.modalTitle}>
+              {receiptType === 'trial' && trialLoc === 'home' && trialHomeSerialPick === '2'
+                ? 'Pick serial (device 2)'
+                : receiptType === 'trial' && trialLoc === 'home'
+                  ? 'Pick serial (device 1)'
+                  : 'Available stock'}
+            </Text>
             <View style={{ width: 48 }} />
           </View>
           <TextInput
@@ -1643,6 +1780,7 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
               <TouchableOpacity
                 style={styles.invRow}
                 onPress={() => {
+                  const gstStr = String(effectiveGstPercentFromInventoryRow(item));
                   if (receiptType === 'invoice' && invModalLineId != null) {
                     setSaleLines((prev) =>
                       prev.map((l) =>
@@ -1651,17 +1789,19 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
                               ...l,
                               inv: item,
                               sellingPrice: String(item.mrp ?? 0),
-                              gstPercent: '18',
+                              gstPercent: gstStr,
                               qty: '1',
                             }
                           : l
                       )
                     );
                   } else if (receiptType === 'trial' && trialLoc === 'home') {
-                    setTrialSerial(item.serialNumber);
+                    if (trialHomeSerialPick === '2') setTrialSerial2(item.serialNumber);
+                    else setTrialSerial(item.serialNumber);
                   }
                   setInvModal(false);
                   setInvModalLineId(null);
+                  setTrialHomeSerialPick(null);
                 }}
               >
                 <Text style={styles.invName}>{item.name}</Text>

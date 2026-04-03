@@ -17,6 +17,10 @@ export type CollectPaymentBookingDetails = {
 /** `trialLocationType` is CRM `trialHearingAidType` (in_office | home). Device from catalog. */
 export type CollectPaymentTrialDetails = {
   catalogProductId: string;
+  /** Optional second trial device (max 2). Home trial requires a serial per device. */
+  secondCatalogProductId?: string;
+  secondHearingAidPrice?: number;
+  secondTrialSerialNumber?: string;
   trialLocationType: 'in_office' | 'home';
   whichEar: 'left' | 'right' | 'both';
   hearingAidPrice: number;
