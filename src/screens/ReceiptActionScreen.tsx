@@ -379,6 +379,10 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
     }
   }, [receiptType, trialLoc, loadInventory]);
 
+  useEffect(() => {
+    if (receiptType !== 'invoice') setInvModalLineId(null);
+  }, [receiptType]);
+
   const loadCatalog = useCallback(async (q: string) => {
     setCatalogLoading(true);
     try {
@@ -439,6 +443,31 @@ export default function ReceiptActionScreen({ appointmentId, onBack }: Props) {
     if (receiptType !== 'invoice') return;
     if (suggestedInvoiceTotal > 0) setAmount(String(suggestedInvoiceTotal));
   }, [receiptType, suggestedInvoiceTotal]);
+
+  /** One empty line by default so staff can pick serial immediately (multi-line invoice). */
+  useEffect(() => {
+    if (receiptType !== 'invoice') return;
+    setSaleLines((prev) => {
+      if (prev.length > 0) return prev;
+      return [
+        {
+          id: newSaleLineId(),
+          inv: null,
+          sellingPrice: '',
+          gstPercent: '18',
+          qty: '1',
+          warranty: '',
+        },
+      ];
+    });
+  }, [receiptType]);
+
+  /** Pre-select the only empty line so inventory list excludes nothing until another line is added. */
+  useEffect(() => {
+    if (receiptType !== 'invoice') return;
+    if (saleLines.length !== 1 || saleLines[0].inv) return;
+    setInvModalLineId((cur) => cur ?? saleLines[0].id);
+  }, [receiptType, saleLines]);
 
   const currentPdfTemplate = useMemo(() => {
     if (receiptType === 'booking') return templateLabels.booking;
